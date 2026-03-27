@@ -1,0 +1,8 @@
+## Interface: 110107
+## Title: Simdragosa
+## Notes: Shows DPS gains from Simdragosa droptimizer sims in item tooltips.
+## Author: Xiantus
+## Version: 1.0.0
+## SavedVariables: SimdragosaDB, SimdragosaConfig
+
+Simdragosa.lua

@@ -1,0 +1,7 @@
+# WoW generated files
+*.bak
+WTF/
+
+# OS
+.DS_Store
+Thumbs.db
