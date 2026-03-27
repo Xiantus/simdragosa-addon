@@ -129,8 +129,17 @@ TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tool
         return
     end
 
-    -- Build DPS gain lines
+    -- Build DPS gain lines (champion=263, heroic=276, mythic=289)
     local gainLines = {}
+
+    if entry.champion and entry.champion > 0 then
+        local col = ColourForDPS(entry.champion)
+        gainLines[#gainLines + 1] = string.format(
+            "%s+%s DPS%s  %s(Champion)%s",
+            col, FormatDPS(entry.champion), C.reset,
+            C.low, C.reset
+        )
+    end
 
     if entry.heroic and entry.heroic > 0 then
         local col = ColourForDPS(entry.heroic)
@@ -246,8 +255,9 @@ SlashCmdList["SIMDRAGOSA"] = function(msg)
             if charData and charData[itemArg] then
                 local e = charData[itemArg]
                 print(string.format("  Item %d%s found%s:", itemArg, C.green, C.reset))
-                if e.heroic then print(string.format("    heroic  = %.1f DPS", e.heroic)) end
-                if e.mythic then print(string.format("    mythic  = %.1f DPS", e.mythic)) end
+                if e.champion then print(string.format("    champion = %.1f DPS", e.champion)) end
+                if e.heroic   then print(string.format("    heroic   = %.1f DPS", e.heroic))   end
+                if e.mythic   then print(string.format("    mythic   = %.1f DPS", e.mythic))   end
                 if e.ilvl   then print(string.format("    ilvl    = %d",       e.ilvl))   end
                 if e.name   then print(string.format("    name    = %s",       e.name))   end
                 if e.updated then print(string.format("    updated = %s",      e.updated)) end
