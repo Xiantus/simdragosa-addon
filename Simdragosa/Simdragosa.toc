@@ -5,5 +5,5 @@
 ## Version: 1.0.0
 ## SavedVariables: SimdragosaConfig
 
-SimdragosaData.lua
+data\SimdragosaData.lua
 Simdragosa.lua
