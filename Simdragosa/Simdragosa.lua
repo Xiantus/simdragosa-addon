@@ -28,6 +28,9 @@ local C = {
     low    = "|cff7878a0",  -- grey   — small gain
     label  = "|cff9a8cff",  -- purple — "Simdragosa" label
     stale  = "|cff7878a0",  -- grey   — staleness note
+    green  = "|cff4ade80",  -- green  — positive debug output
+    red    = "|cfff87171",  -- red    — error/missing debug output
+    hi     = "|cfffbbf24",  -- yellow — highlighted values in debug output
     reset  = "|r",
 }
 
@@ -210,10 +213,55 @@ SlashCmdList["SIMDRAGOSA"] = function(msg)
             print(C.label .. ADDON .. C.reset .. ": usage: /sdr staleness <days>  (0 = never hide)")
         end
 
+    elseif cmd == "debug" then
+        local charKey = GetCharKey()
+        print(C.label .. "── Simdragosa debug ──" .. C.reset)
+        print("  Character key : " .. C.hi .. charKey .. C.reset)
+        print("  Config enabled: " .. tostring(SimdragosaConfig and SimdragosaConfig.enabled))
+
+        -- DB overview
+        if not SimdragosaDB or next(SimdragosaDB) == nil then
+            print("  " .. C.red .. "SimdragosaDB is empty — no sims have been stored yet." .. C.reset)
+            print("  Run a Droptimizer sim in Simdragosa, then /reload.")
+            return
+        end
+
+        -- List all character keys present in the DB
+        local keys = {}
+        for k in pairs(SimdragosaDB) do keys[#keys+1] = k end
+        print("  DB has entries for " .. #keys .. " character(s):")
+        for _, k in ipairs(keys) do
+            local count = 0
+            for _ in pairs(SimdragosaDB[k]) do count = count + 1 end
+            local match = (k == charKey) and C.green .. " ◄ you" .. C.reset or ""
+            print(string.format("    %s%s%s — %d items%s", C.hi, k, C.reset, count, match))
+        end
+
+        -- Check a specific item ID if provided
+        local itemArg = tonumber(msg:match("%d+"))
+        if itemArg then
+            local charData = SimdragosaDB[charKey]
+            if charData and charData[itemArg] then
+                local e = charData[itemArg]
+                print(string.format("  Item %d%s found%s:", itemArg, C.green, C.reset))
+                if e.heroic then print(string.format("    heroic  = %.1f DPS", e.heroic)) end
+                if e.mythic then print(string.format("    mythic  = %.1f DPS", e.mythic)) end
+                if e.ilvl   then print(string.format("    ilvl    = %d",       e.ilvl))   end
+                if e.name   then print(string.format("    name    = %s",       e.name))   end
+                if e.updated then print(string.format("    updated = %s",      e.updated)) end
+            else
+                print(string.format("  Item %d%s not found%s for %s.",
+                    itemArg, C.red, C.reset, charKey))
+                print("  Either it wasn't in the Droptimizer results, or the sim hasn't run yet.")
+            end
+        end
+
     else
         print(C.label .. ADDON .. C.reset .. " commands:")
-        print("  /sdr toggle          — show/hide tooltip lines")
-        print("  /sdr status          — show stored item count for your character")
-        print("  /sdr staleness <n>   — hide sims older than N days (0 = never)")
+        print("  /sdr toggle            — show/hide tooltip lines")
+        print("  /sdr status            — show stored item count for your character")
+        print("  /sdr staleness <n>     — hide sims older than N days (0 = never)")
+        print("  /sdr debug             — show DB contents and character key")
+        print("  /sdr debug <itemID>    — check if a specific item ID has sim data")
     end
 end
