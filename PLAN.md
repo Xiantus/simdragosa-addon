@@ -72,12 +72,14 @@ SimdragosaDB = {
 
 **Goal:** Make it feel polished and handle edge cases.
 
-- [ ] `/simdragosa` slash command — print current character's sim summary to chat
-- [ ] Config option: toggle tooltip lines on/off (`/simdragosa toggle`)
-- [ ] Config option: hide entries older than N days (`/simdragosa staleness 14`)
+- [x] `/simdragosa` slash commands — toggle, status, staleness, debug
+- [x] Config option: toggle tooltip lines on/off (`/simdragosa toggle`)
+- [x] Config option: hide entries older than N days (`/simdragosa staleness 14`)
+- [x] `SavedVariables: SimdragosaConfig` — persist user preferences
+- [x] Data file moved to addon folder (`SimdragosaData.lua`) so `/reload` picks up
+      new sim data instantly without requiring a full logout
 - [ ] Show "⚠ outdated" indicator if data is older than the configured threshold
 - [ ] Handle realm name normalisation (spaces → no-spaces, connected realms)
-- [ ] `SavedVariables: SimdragosaDB, SimdragosaConfig` — persist user preferences
 
 ---
 

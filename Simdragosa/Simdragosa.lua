@@ -2,7 +2,8 @@
 -- Simdragosa — WoW tooltip addon
 -- Shows Droptimizer DPS gains (from the Simdragosa sim tool) in item tooltips.
 --
--- Data source: SimdragosaDB SavedVariable, written by the Simdragosa web app.
+-- Data source: SimdragosaData.lua in the addon folder, written by the Simdragosa web app.
+--              WoW loads this file on every /reload — no logout required.
 -- Repo:        https://github.com/Xiantus/simdragosa-addon
 -- =============================================================================
 
@@ -97,7 +98,8 @@ frame:SetScript("OnEvent", function(self, event, addonName)
         end
     end
 
-    -- Ensure DB table exists (may be nil on first login)
+    -- SimdragosaDB is populated by SimdragosaData.lua (loaded before this file).
+    -- Fall back to empty table if the data file doesn't exist yet.
     SimdragosaDB = SimdragosaDB or {}
 end)
 
