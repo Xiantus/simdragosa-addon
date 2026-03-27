@@ -1,4 +1,4 @@
-## Interface: 110107
+## Interface: 120001
 ## Title: Simdragosa
 ## Notes: Shows DPS gains from Simdragosa droptimizer sims in item tooltips.
 ## Author: Xiantus
