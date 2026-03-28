@@ -129,34 +129,42 @@ TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tool
         return
     end
 
-    -- Build DPS gain lines (champion=263, heroic=276, mythic=289)
+    -- Build DPS gain lines — one per spec, showing all available tracks inline
     local gainLines = {}
 
-    if entry.champion and entry.champion > 0 then
-        local col = ColourForDPS(entry.champion)
-        gainLines[#gainLines + 1] = string.format(
-            "%s+%s DPS%s  %s(Champion)%s",
-            col, FormatDPS(entry.champion), C.reset,
-            C.low, C.reset
-        )
-    end
+    local specs = entry.specs
+    if specs then
+        for _, specData in ipairs(specs) do
+            -- Collect per-track gains for this spec
+            local diffParts = {}
+            if specData.champion and specData.champion > 0 then
+                local col = ColourForDPS(specData.champion)
+                diffParts[#diffParts + 1] = string.format("%s+%s DPS%s %s(Champ)%s",
+                    col, FormatDPS(specData.champion), C.reset, C.low, C.reset)
+            end
+            if specData.heroic and specData.heroic > 0 then
+                local col = ColourForDPS(specData.heroic)
+                diffParts[#diffParts + 1] = string.format("%s+%s DPS%s %s(Heroic)%s",
+                    col, FormatDPS(specData.heroic), C.reset, C.low, C.reset)
+            end
+            if specData.mythic and specData.mythic > 0 then
+                local col = ColourForDPS(specData.mythic)
+                diffParts[#diffParts + 1] = string.format("%s+%s DPS%s %s(Mythic)%s",
+                    col, FormatDPS(specData.mythic), C.reset, C.low, C.reset)
+            end
 
-    if entry.heroic and entry.heroic > 0 then
-        local col = ColourForDPS(entry.heroic)
-        gainLines[#gainLines + 1] = string.format(
-            "%s+%s DPS%s  %s(Heroic)%s",
-            col, FormatDPS(entry.heroic), C.reset,
-            C.low, C.reset
-        )
-    end
-
-    if entry.mythic and entry.mythic > 0 then
-        local col = ColourForDPS(entry.mythic)
-        gainLines[#gainLines + 1] = string.format(
-            "%s+%s DPS%s  %s(Mythic)%s",
-            col, FormatDPS(entry.mythic), C.reset,
-            C.low, C.reset
-        )
+            if #diffParts > 0 then
+                local diffStr = table.concat(diffParts, "  ")
+                local specName = specData.spec or ""
+                if specName ~= "" then
+                    gainLines[#gainLines + 1] = string.format("%s[%s]%s  %s",
+                        C.label, specName, C.reset, diffStr)
+                else
+                    -- Legacy data (no spec recorded) — show gains without label
+                    gainLines[#gainLines + 1] = diffStr
+                end
+            end
+        end
     end
 
     if #gainLines == 0 then return end
@@ -255,12 +263,19 @@ SlashCmdList["SIMDRAGOSA"] = function(msg)
             if charData and charData[itemArg] then
                 local e = charData[itemArg]
                 print(string.format("  Item %d%s found%s:", itemArg, C.green, C.reset))
-                if e.champion then print(string.format("    champion = %.1f DPS", e.champion)) end
-                if e.heroic   then print(string.format("    heroic   = %.1f DPS", e.heroic))   end
-                if e.mythic   then print(string.format("    mythic   = %.1f DPS", e.mythic))   end
-                if e.ilvl   then print(string.format("    ilvl    = %d",       e.ilvl))   end
-                if e.name   then print(string.format("    name    = %s",       e.name))   end
-                if e.updated then print(string.format("    updated = %s",      e.updated)) end
+                if e.ilvl    then print(string.format("    ilvl    = %d",  e.ilvl))    end
+                if e.name    then print(string.format("    name    = %s",  e.name))    end
+                if e.updated then print(string.format("    updated = %s",  e.updated)) end
+                if e.specs then
+                    for _, sd in ipairs(e.specs) do
+                        local specLabel = (sd.spec and sd.spec ~= "") and sd.spec or "?"
+                        local parts = {}
+                        if sd.champion then parts[#parts+1] = string.format("champ=%.1f", sd.champion) end
+                        if sd.heroic   then parts[#parts+1] = string.format("heroic=%.1f", sd.heroic)  end
+                        if sd.mythic   then parts[#parts+1] = string.format("mythic=%.1f", sd.mythic)  end
+                        print(string.format("    [%s]  %s", specLabel, table.concat(parts, "  ")))
+                    end
+                end
             else
                 print(string.format("  Item %d%s not found%s for %s.",
                     itemArg, C.red, C.reset, charKey))
