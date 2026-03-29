@@ -132,39 +132,42 @@ TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tool
     -- Build DPS gain lines — one per spec, showing all available tracks inline
     local gainLines = {}
 
-    local specs = entry.specs
-    if specs then
-        for _, specData in ipairs(specs) do
-            -- Collect per-track gains for this spec
-            local diffParts = {}
-            if specData.champion and specData.champion > 0 then
-                local col = ColourForDPS(specData.champion)
-                diffParts[#diffParts + 1] = string.format("%s+%s DPS%s %s(Champ)%s",
-                    col, FormatDPS(specData.champion), C.reset, C.low, C.reset)
-            end
-            if specData.heroic and specData.heroic > 0 then
-                local col = ColourForDPS(specData.heroic)
-                diffParts[#diffParts + 1] = string.format("%s+%s DPS%s %s(Heroic)%s",
-                    col, FormatDPS(specData.heroic), C.reset, C.low, C.reset)
-            end
-            if specData.mythic and specData.mythic > 0 then
-                local col = ColourForDPS(specData.mythic)
-                diffParts[#diffParts + 1] = string.format("%s+%s DPS%s %s(Mythic)%s",
-                    col, FormatDPS(specData.mythic), C.reset, C.low, C.reset)
-            end
-
-            if #diffParts > 0 then
-                local diffStr = table.concat(diffParts, "  ")
-                local specName = specData.spec or ""
-                if specName ~= "" then
-                    gainLines[#gainLines + 1] = string.format("%s[%s]%s  %s",
-                        C.label, specName, C.reset, diffStr)
-                else
-                    -- Legacy data (no spec recorded) — show gains without label
-                    gainLines[#gainLines + 1] = diffStr
-                end
+    local function addDiffParts(src, specLabel)
+        local diffParts = {}
+        if src.champion and src.champion > 0 then
+            local col = ColourForDPS(src.champion)
+            diffParts[#diffParts + 1] = string.format("%s+%s DPS%s %s(Champ)%s",
+                col, FormatDPS(src.champion), C.reset, C.low, C.reset)
+        end
+        if src.heroic and src.heroic > 0 then
+            local col = ColourForDPS(src.heroic)
+            diffParts[#diffParts + 1] = string.format("%s+%s DPS%s %s(Heroic)%s",
+                col, FormatDPS(src.heroic), C.reset, C.low, C.reset)
+        end
+        if src.mythic and src.mythic > 0 then
+            local col = ColourForDPS(src.mythic)
+            diffParts[#diffParts + 1] = string.format("%s+%s DPS%s %s(Mythic)%s",
+                col, FormatDPS(src.mythic), C.reset, C.low, C.reset)
+        end
+        if #diffParts > 0 then
+            local diffStr = table.concat(diffParts, "  ")
+            if specLabel and specLabel ~= "" then
+                gainLines[#gainLines + 1] = string.format("%s[%s]%s  %s",
+                    C.label, specLabel, C.reset, diffStr)
+            else
+                gainLines[#gainLines + 1] = diffStr
             end
         end
+    end
+
+    if entry.specs then
+        -- New per-spec format: specs = { {spec="Arcane", heroic=600}, ... }
+        for _, specData in ipairs(entry.specs) do
+            addDiffParts(specData, specData.spec or "")
+        end
+    else
+        -- Legacy format: champion/heroic/mythic directly on entry
+        addDiffParts(entry, nil)
     end
 
     if #gainLines == 0 then return end
