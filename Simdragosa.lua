@@ -162,7 +162,9 @@ TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tool
 
     if not entry.specs then return end
     for _, specData in ipairs(entry.specs) do
-        addDiffParts(specData, specData.spec or "")
+        if specData.spec and specData.spec ~= "" then
+            addDiffParts(specData, specData.spec)
+        end
     end
 
     if #gainLines == 0 then return end
