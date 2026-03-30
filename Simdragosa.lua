@@ -160,14 +160,9 @@ TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tool
         end
     end
 
-    if entry.specs then
-        -- New per-spec format: specs = { {spec="Arcane", heroic=600}, ... }
-        for _, specData in ipairs(entry.specs) do
-            addDiffParts(specData, specData.spec or "")
-        end
-    else
-        -- Legacy format: champion/heroic/mythic directly on entry
-        addDiffParts(entry, nil)
+    if not entry.specs then return end
+    for _, specData in ipairs(entry.specs) do
+        addDiffParts(specData, specData.spec or "")
     end
 
     if #gainLines == 0 then return end
