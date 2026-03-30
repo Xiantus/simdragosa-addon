@@ -2,10 +2,9 @@
 *.bak
 WTF/
 
-# Data folder — written by the Simdragosa web app at runtime.
-# Excluded from git and CurseForge packages so addon updates don't
-# overwrite the symlink used in the local dev setup.
-data/
+# SimdragosaData.lua is regenerated after every sim run by the web app.
+# Ignore it so local sim data is never committed.
+data/SimdragosaData.lua
 
 # OS
 .DS_Store
