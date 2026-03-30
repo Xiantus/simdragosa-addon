@@ -4,7 +4,7 @@
 ## Author: Xiantus
 ## Version: 1.0.0
 ## IconTexture: Interface\AddOns\Simdragosa\simdragosa-icon
-## X-Curse-Project-ID: 0
+## X-Curse-Project-ID: 1499663
 ## SavedVariables: SimdragosaConfig
 
 data\SimdragosaData.lua
