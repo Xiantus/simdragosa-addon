@@ -1,0 +1,4 @@
+package-as: Simdragosa
+
+ignore:
+  - .pkgmeta

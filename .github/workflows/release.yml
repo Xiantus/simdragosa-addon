@@ -1,0 +1,21 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Package and upload to CurseForge
+        run: curl -s https://raw.githubusercontent.com/BigWigsMods/packager/master/release.sh | bash
+        working-directory: Simdragosa
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          CURSE_ID: ${{ secrets.CURSE_ID }}
