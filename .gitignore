@@ -2,6 +2,11 @@
 *.bak
 WTF/
 
+# Data folder — written by the Simdragosa web app at runtime.
+# Excluded from git and CurseForge packages so addon updates don't
+# overwrite the symlink used in the local dev setup.
+data/
+
 # OS
 .DS_Store
 Thumbs.db
