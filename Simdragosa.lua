@@ -270,9 +270,9 @@ SlashCmdList["SIMDRAGOSA"] = function(msg)
                     for _, sd in ipairs(e.specs) do
                         local specLabel = (sd.spec and sd.spec ~= "") and sd.spec or "?"
                         local parts = {}
-                        if sd.champion then parts[#parts+1] = string.format("champ=%.1f", sd.champion) end
-                        if sd.heroic   then parts[#parts+1] = string.format("heroic=%.1f", sd.heroic)  end
-                        if sd.mythic   then parts[#parts+1] = string.format("mythic=%.1f", sd.mythic)  end
+                        if sd.champion then parts[#parts+1] = string.format("champ=%.1f",  sd.champion) end
+                        if sd.heroic   then parts[#parts+1] = string.format("heroic=%.1f", sd.heroic)   end
+                        if sd.mythic   then parts[#parts+1] = string.format("mythic=%.1f", sd.mythic)   end
                         print(string.format("    [%s]  %s", specLabel, table.concat(parts, "  ")))
                     end
                 end
