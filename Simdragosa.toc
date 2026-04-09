@@ -1,6 +1,6 @@
 ## Interface: 120001
 ## Title: Simdragosa
-## Notes: Companion addon for the Simdragosa desktop app. Automatically shows Droptimizer DPS gains on item tooltips for Normal, Heroic, Mythic, and M+ loot tracks — updated after every sim without a logout. Use /sdr for commands.
+## Notes: Companion addon for the Simdragosa desktop app (github.com/Xiantus/simdragosa-standalone). Automatically shows Droptimizer DPS gains on item tooltips for Normal, Heroic, Mythic, and M+ loot tracks — updated after every sim without a logout. Use /sdr for commands.
 ## Author: Xiantus
 ## Version: 1.1.0
 ## IconTexture: Interface\AddOns\Simdragosa\simdragosa-icon
