@@ -365,6 +365,14 @@ local function RW_GetOrCreateRow(idx)
         if self.itemID then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetItemByID(self.itemID)
+            if self.simIlvl then
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddDoubleLine(
+                    C.label .. "Simdragosa" .. C.reset,
+                    "|cffffd100Simmed at " .. self.simIlvl .. "|r",
+                    1, 1, 1, 1, 1, 1
+                )
+            end
             GameTooltip:Show()
         end
         self.bg:SetColorTexture(0.25, 0.20, 0.45, 0.5)
@@ -419,6 +427,7 @@ local function RW_Refresh()
         local item = list[i]
         local row  = RW_GetOrCreateRow(i)
         row.itemID  = item.itemID
+        row.simIlvl = item.ilvl
         row.oddRow  = (i % 2 == 1)
 
         -- Background alternating tint
