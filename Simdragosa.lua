@@ -111,13 +111,14 @@ frame:SetScript("OnEvent", function(self, event, addonName)
             SimdragosaResultsFrame:SetPoint(p[1], UIParent, p[2], p[3], p[4])
         end
 
-        -- Hook SimC addon if it loaded before us
-        local loaded = (C_AddOns and C_AddOns.IsAddOnLoaded("SimulationCraft"))
-                    or (IsAddOnLoaded and IsAddOnLoaded("SimulationCraft"))
-        if loaded then SIMC_HookFrame() end
-
-    elseif addonName == "SimulationCraft" then
+        -- Try hooking the SimC slash command now (works if SimC loaded before us)
+        -- and register to try again if SimC loads after us.
         SIMC_HookFrame()
+
+    else
+        -- Any other addon finishing load — try hooking in case it's SimC
+        -- (covers different folder names / load-order variations).
+        if not simcHooked then SIMC_HookFrame() end
     end
 end)
 
@@ -798,30 +799,11 @@ end
 
 local simcHooked = false
 
--- Find the EditBox inside the SimulationCraft frame.
--- The addon places it at frame.edit in most versions; fall back to scanning children.
-local function SIMC_FindEditBox(mainFrame)
-    for _, key in ipairs({ "edit", "editBox", "EditBox" }) do
-        local f = mainFrame[key]
-        if f and type(f) == "table" and f.GetText then return f end
-    end
-    -- Scan direct children and one level of scroll frames
-    for i = 1, mainFrame:GetNumChildren() do
-        local child = select(i, mainFrame:GetChildren())
-        if child.IsObjectType and child:IsObjectType("EditBox") then
-            return child
-        end
-        if child.GetScrollChild then
-            local sc = child:GetScrollChild()
-            if sc and sc.IsObjectType and sc:IsObjectType("EditBox") then return sc end
-        end
-    end
-    return nil
-end
-
 -- Store a captured SimC profile string into SimdragosaConfig.exports.
 local function SIMC_StoreProfile(profile)
     if not profile or profile == "" then return end
+    -- Quick sanity check: a SimC profile always has a spec= line
+    if not profile:find("\nspec=") then return end
     local charKey = GetCharKey()
     local specIdx = GetSpecialization() or 1
     local specId  = GetSpecializationInfo(specIdx)
@@ -840,58 +822,88 @@ local function SIMC_StoreProfile(profile)
     print("  " .. C.low .. "/reload to flush to disk — the Simdragosa app will detect it." .. C.reset)
 end
 
--- Hook the SimulationCraftFrame's OnShow so every /simc auto-captures the profile.
-function SIMC_HookFrame()
-    if simcHooked then return end
-    local scFrame = _G["SimulationCraftFrame"]
-    if not scFrame then return end
+-- Walk the visible frame tree rooted at obj and return the first EditBox
+-- whose text looks like a SimC profile (has a spec= line).
+local function SIMC_ScanForProfile(obj, depth)
+    depth = depth or 0
+    if depth > 6 then return nil end
+    if not obj.IsShown or not obj:IsShown() then return nil end
 
-    local editBox = SIMC_FindEditBox(scFrame)
-    if not editBox then
-        print(C.label .. ADDON .. C.reset
-            .. C.red .. ": SimulationCraft frame found but could not locate its EditBox." .. C.reset
-            .. " Use " .. C.hi .. "/sdr export" .. C.reset .. " as a fallback.")
-        return
+    if obj.IsObjectType and obj:IsObjectType("EditBox") then
+        local text = obj:GetText() or ""
+        if text:find("\nspec=") then return text end
+        return nil
     end
 
-    scFrame:HookScript("OnShow", function()
-        -- Defer one tick so the frame has finished populating the text
-        C_Timer.After(0, function()
-            SIMC_StoreProfile(editBox:GetText())
-        end)
-    end)
+    if obj.GetNumChildren then
+        for i = 1, obj:GetNumChildren() do
+            local result = SIMC_ScanForProfile(select(i, obj:GetChildren()), depth + 1)
+            if result then return result end
+        end
+    end
 
-    simcHooked = true
-    print(C.label .. ADDON .. C.reset
-        .. ": hooked SimulationCraft addon — use "
-        .. C.hi .. "/simc" .. C.reset
-        .. " to export your profile; Simdragosa will capture it automatically.")
+    -- Also check scroll-frame children
+    if obj.GetScrollChild then
+        local sc = obj:GetScrollChild()
+        if sc then
+            local result = SIMC_ScanForProfile(sc, depth + 1)
+            if result then return result end
+        end
+    end
+
+    return nil
+end
+
+-- Hook the SimC addon's slash command so every /simc auto-captures the profile.
+-- Tries the slash-command table keys the SimC addon typically registers under.
+function SIMC_HookFrame()
+    if simcHooked then return end
+
+    -- The SimC addon registers its slash command as SIMULATIONCRAFT (for /simc).
+    -- Try a few possible keys in case future versions change it.
+    local hooked = false
+    for _, key in ipairs({ "SIMULATIONCRAFT", "SIMC", "SC2", "SIMULATIONCRAFT2" }) do
+        if SlashCmdList[key] then
+            hooksecurefunc(SlashCmdList, key, function()
+                -- Give the frame one tick to populate its EditBox, then scan
+                C_Timer.After(0.05, function()
+                    local profile = SIMC_ScanForProfile(UIParent)
+                    if profile then SIMC_StoreProfile(profile) end
+                end)
+            end)
+            hooked = true
+            break
+        end
+    end
+
+    if hooked then
+        simcHooked = true
+        print(C.label .. ADDON .. C.reset
+            .. ": hooked SimulationCraft — use "
+            .. C.hi .. "/simc" .. C.reset
+            .. " and your profile will be captured automatically.")
+    end
 end
 
 -- ---------------------------------------------------------------------------
 -- DoExport  (/sdr export)
 -- ---------------------------------------------------------------------------
 
--- Store the profile: prefer the open SimC frame; fall back to manual build.
 local function DoExport()
-    -- If the SimC frame is open and populated, use its text directly.
-    local scFrame = _G["SimulationCraftFrame"]
-    if scFrame then
-        if scFrame:IsShown() then
-            local editBox = SIMC_FindEditBox(scFrame)
-            if editBox then
-                local profile = editBox:GetText()
-                if profile and profile ~= "" then
-                    SIMC_StoreProfile(profile)
-                    return
-                end
-            end
-        end
-        -- Frame exists but isn't open — tell the player to use /simc
+    -- Scan the screen for a visible SimC export EditBox (works regardless of frame name)
+    local profile = SIMC_ScanForProfile(UIParent)
+    if profile then
+        SIMC_StoreProfile(profile)
+        return
+    end
+
+    -- Nothing found on screen — check if the SimC addon is even loaded
+    local simcLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded("SimulationCraft"))
+                    or (IsAddOnLoaded and IsAddOnLoaded("SimulationCraft"))
+    if simcLoaded then
         print(C.label .. ADDON .. C.reset
             .. ": Type " .. C.hi .. "/simc" .. C.reset
-            .. " to open the SimulationCraft export window."
-            .. " Your profile will be captured automatically when it opens.")
+            .. " to open the export window first, then run /sdr export.")
         return
     end
 
@@ -900,13 +912,13 @@ local function DoExport()
         .. C.low .. ": SimulationCraft addon not found — building profile manually."
         .. " Install the SimulationCraft addon for accurate exports." .. C.reset)
     local charKey = GetCharKey()
-    local profile = BuildSimCProfile()
-    local specIdx = GetSpecialization() or 1
-    local specId  = select(1, GetSpecializationInfo(specIdx))
-    local spec    = SIMC_SPEC[specId] or "unknown"
+    local bProfile = BuildSimCProfile()
+    local specIdx  = GetSpecialization() or 1
+    local specId   = select(1, GetSpecializationInfo(specIdx))
+    local spec     = SIMC_SPEC[specId] or "unknown"
     SimdragosaConfig.exports = SimdragosaConfig.exports or {}
     SimdragosaConfig.exports[charKey] = {
-        simc      = profile,
+        simc      = bProfile,
         spec      = spec,
         timestamp = time(),
         enabled   = true,
