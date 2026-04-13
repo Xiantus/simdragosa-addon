@@ -827,7 +827,10 @@ end
 local function SIMC_ScanForProfile(obj, depth)
     depth = depth or 0
     if depth > 6 then return nil end
-    if not obj.IsShown or not obj:IsShown() then return nil end
+    -- Some frame types (e.g. ServicesLogoutPopup) have IsShown in their metatable
+    -- but crash when called — use pcall to guard against bad self errors.
+    local ok, shown = pcall(function() return obj:IsShown() end)
+    if not ok or not shown then return nil end
 
     if obj.IsObjectType and obj:IsObjectType("EditBox") then
         local text = obj:GetText() or ""
@@ -865,9 +868,16 @@ function SIMC_HookFrame()
     for _, key in ipairs({ "SIMULATIONCRAFT", "SIMC", "SC2", "SIMULATIONCRAFT2" }) do
         if SlashCmdList[key] then
             hooksecurefunc(SlashCmdList, key, function()
-                -- Give the frame one tick to populate its EditBox, then scan
+                -- Give the frame one tick to populate its EditBox, then grab it.
+                -- Try the known global name first; fall back to a full-tree scan.
                 C_Timer.After(0.05, function()
-                    local profile = SIMC_ScanForProfile(UIParent)
+                    local profile
+                    local eb = _G["SimulationCraftEditBox"]
+                    if eb then
+                        local text = eb:GetText() or ""
+                        if text:find("\nspec=") then profile = text end
+                    end
+                    if not profile then profile = SIMC_ScanForProfile(UIParent) end
                     if profile then SIMC_StoreProfile(profile) end
                 end)
             end)
@@ -890,7 +900,17 @@ end
 -- ---------------------------------------------------------------------------
 
 local function DoExport()
-    -- Scan the screen for a visible SimC export EditBox (works regardless of frame name)
+    -- Try the known SimC addon global EditBox first (fastest, avoids frame scan crash).
+    local eb = _G["SimulationCraftEditBox"]
+    if eb then
+        local text = eb:GetText() or ""
+        if text:find("\nspec=") then
+            SIMC_StoreProfile(text)
+            return
+        end
+    end
+
+    -- Fall back: scan the visible frame tree (handles renamed/future SimC versions).
     local profile = SIMC_ScanForProfile(UIParent)
     if profile then
         SIMC_StoreProfile(profile)
