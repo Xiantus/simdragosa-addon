@@ -88,28 +88,36 @@ local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 
 frame:SetScript("OnEvent", function(self, event, addonName)
-    if addonName ~= ADDON then return end
-
-    -- Merge saved config with defaults
-    SimdragosaConfig = SimdragosaConfig or {}
-    for k, v in pairs(DEFAULTS) do
-        if SimdragosaConfig[k] == nil then
-            SimdragosaConfig[k] = v
+    if addonName == ADDON then
+        -- Merge saved config with defaults
+        SimdragosaConfig = SimdragosaConfig or {}
+        for k, v in pairs(DEFAULTS) do
+            if SimdragosaConfig[k] == nil then
+                SimdragosaConfig[k] = v
+            end
         end
-    end
 
-    -- SimdragosaDB is populated by SimdragosaData.lua (loaded before this file).
-    -- Fall back to empty table if the data file doesn't exist yet.
-    SimdragosaDB = SimdragosaDB or {}
+        -- SimdragosaDB is populated by SimdragosaData.lua (loaded before this file).
+        -- Fall back to empty table if the data file doesn't exist yet.
+        SimdragosaDB = SimdragosaDB or {}
 
-    -- Build the results window now that config is initialised.
-    RW_CreateFrame()
+        -- Build the results window now that config is initialised.
+        RW_CreateFrame()
 
-    -- Restore saved window position.
-    if SimdragosaConfig.windowPos and SimdragosaResultsFrame then
-        local p = SimdragosaConfig.windowPos
-        SimdragosaResultsFrame:ClearAllPoints()
-        SimdragosaResultsFrame:SetPoint(p[1], UIParent, p[2], p[3], p[4])
+        -- Restore saved window position.
+        if SimdragosaConfig.windowPos and SimdragosaResultsFrame then
+            local p = SimdragosaConfig.windowPos
+            SimdragosaResultsFrame:ClearAllPoints()
+            SimdragosaResultsFrame:SetPoint(p[1], UIParent, p[2], p[3], p[4])
+        end
+
+        -- Hook SimC addon if it loaded before us
+        local loaded = (C_AddOns and C_AddOns.IsAddOnLoaded("SimulationCraft"))
+                    or (IsAddOnLoaded and IsAddOnLoaded("SimulationCraft"))
+        if loaded then SIMC_HookFrame() end
+
+    elseif addonName == "SimulationCraft" then
+        SIMC_HookFrame()
     end
 end)
 
@@ -784,12 +792,39 @@ local function BuildSimCProfile()
     return table.concat(lines, "\n") .. "\n"
 end
 
--- Run the export: store into SimdragosaConfig.exports[charKey] (persisted as SavedVariables).
-local function DoExport()
+-- ---------------------------------------------------------------------------
+-- SimulationCraft addon hook — auto-capture the official profile on /simc
+-- ---------------------------------------------------------------------------
+
+local simcHooked = false
+
+-- Find the EditBox inside the SimulationCraft frame.
+-- The addon places it at frame.edit in most versions; fall back to scanning children.
+local function SIMC_FindEditBox(mainFrame)
+    for _, key in ipairs({ "edit", "editBox", "EditBox" }) do
+        local f = mainFrame[key]
+        if f and type(f) == "table" and f.GetText then return f end
+    end
+    -- Scan direct children and one level of scroll frames
+    for i = 1, mainFrame:GetNumChildren() do
+        local child = select(i, mainFrame:GetChildren())
+        if child.IsObjectType and child:IsObjectType("EditBox") then
+            return child
+        end
+        if child.GetScrollChild then
+            local sc = child:GetScrollChild()
+            if sc and sc.IsObjectType and sc:IsObjectType("EditBox") then return sc end
+        end
+    end
+    return nil
+end
+
+-- Store a captured SimC profile string into SimdragosaConfig.exports.
+local function SIMC_StoreProfile(profile)
+    if not profile or profile == "" then return end
     local charKey = GetCharKey()
-    local profile = BuildSimCProfile()
     local specIdx = GetSpecialization() or 1
-    local specId  = select(1, GetSpecializationInfo(specIdx))
+    local specId  = GetSpecializationInfo(specIdx)
     local spec    = SIMC_SPEC[specId] or "unknown"
 
     SimdragosaConfig.exports = SimdragosaConfig.exports or {}
@@ -799,13 +834,84 @@ local function DoExport()
         timestamp = time(),
         enabled   = true,
     }
-
     print(C.label .. ADDON .. C.reset
-        .. ": SimC export stored for "
-        .. C.hi .. charKey .. C.reset
-        .. " (" .. spec .. ")."
-    )
-    print("  " .. C.low .. "/reload to flush to disk, then the Simdragosa app will detect it." .. C.reset)
+        .. ": SimC profile captured for "
+        .. C.hi .. charKey .. C.reset .. " (" .. spec .. ").")
+    print("  " .. C.low .. "/reload to flush to disk — the Simdragosa app will detect it." .. C.reset)
+end
+
+-- Hook the SimulationCraftFrame's OnShow so every /simc auto-captures the profile.
+function SIMC_HookFrame()
+    if simcHooked then return end
+    local scFrame = _G["SimulationCraftFrame"]
+    if not scFrame then return end
+
+    local editBox = SIMC_FindEditBox(scFrame)
+    if not editBox then
+        print(C.label .. ADDON .. C.reset
+            .. C.red .. ": SimulationCraft frame found but could not locate its EditBox." .. C.reset
+            .. " Use " .. C.hi .. "/sdr export" .. C.reset .. " as a fallback.")
+        return
+    end
+
+    scFrame:HookScript("OnShow", function()
+        -- Defer one tick so the frame has finished populating the text
+        C_Timer.After(0, function()
+            SIMC_StoreProfile(editBox:GetText())
+        end)
+    end)
+
+    simcHooked = true
+    print(C.label .. ADDON .. C.reset
+        .. ": hooked SimulationCraft addon — use "
+        .. C.hi .. "/simc" .. C.reset
+        .. " to export your profile; Simdragosa will capture it automatically.")
+end
+
+-- ---------------------------------------------------------------------------
+-- DoExport  (/sdr export)
+-- ---------------------------------------------------------------------------
+
+-- Store the profile: prefer the open SimC frame; fall back to manual build.
+local function DoExport()
+    -- If the SimC frame is open and populated, use its text directly.
+    local scFrame = _G["SimulationCraftFrame"]
+    if scFrame then
+        if scFrame:IsShown() then
+            local editBox = SIMC_FindEditBox(scFrame)
+            if editBox then
+                local profile = editBox:GetText()
+                if profile and profile ~= "" then
+                    SIMC_StoreProfile(profile)
+                    return
+                end
+            end
+        end
+        -- Frame exists but isn't open — tell the player to use /simc
+        print(C.label .. ADDON .. C.reset
+            .. ": Type " .. C.hi .. "/simc" .. C.reset
+            .. " to open the SimulationCraft export window."
+            .. " Your profile will be captured automatically when it opens.")
+        return
+    end
+
+    -- SimulationCraft addon not installed — fall back to the manual builder.
+    print(C.label .. ADDON .. C.reset
+        .. C.low .. ": SimulationCraft addon not found — building profile manually."
+        .. " Install the SimulationCraft addon for accurate exports." .. C.reset)
+    local charKey = GetCharKey()
+    local profile = BuildSimCProfile()
+    local specIdx = GetSpecialization() or 1
+    local specId  = select(1, GetSpecializationInfo(specIdx))
+    local spec    = SIMC_SPEC[specId] or "unknown"
+    SimdragosaConfig.exports = SimdragosaConfig.exports or {}
+    SimdragosaConfig.exports[charKey] = {
+        simc      = profile,
+        spec      = spec,
+        timestamp = time(),
+        enabled   = true,
+    }
+    print("  " .. C.low .. "/reload to flush to disk." .. C.reset)
 end
 
 -- Opt out the current character from auto-detection by the standalone.
@@ -926,7 +1032,8 @@ SlashCmdList["SIMDRAGOSA"] = function(msg)
 
     else
         print(C.label .. ADDON .. C.reset .. " commands:")
-        print("  /sdr export            — capture SimC profile; /reload to flush to disk")
+        print("  /simc                  — open SimulationCraft export (auto-captured by Simdragosa)")
+        print("  /sdr export            — capture from open /simc window (or manual fallback); /reload to flush")
         print("  /sdr export off        — opt this character out of auto-sim detection")
         print("  /sdr results           — open/close the upgrade results window")
         print("  /sdr toggle            — show/hide tooltip lines")
