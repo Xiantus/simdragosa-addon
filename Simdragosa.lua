@@ -627,6 +627,201 @@ function RW_CreateFrame()
 end
 
 -- ---------------------------------------------------------------------------
+-- SimC Export  (/sdr export)
+-- ---------------------------------------------------------------------------
+
+local SIMC_SLOTS = {
+    [1]  = "head",      [2]  = "neck",    [3]  = "shoulder",
+    [5]  = "chest",     [6]  = "waist",   [7]  = "legs",
+    [8]  = "feet",      [9]  = "wrist",   [10] = "hands",
+    [11] = "finger1",   [12] = "finger2",
+    [13] = "trinket1",  [14] = "trinket2",
+    [15] = "back",      [16] = "main_hand", [17] = "off_hand",
+}
+
+-- raceFilename (second return of UnitRace) → SimC race name
+local SIMC_RACE = {
+    Human              = "human",              Orc              = "orc",
+    Dwarf              = "dwarf",              NightElf         = "night_elf",
+    Undead             = "undead",             Tauren           = "tauren",
+    Gnome              = "gnome",              Troll            = "troll",
+    BloodElf           = "blood_elf",          Draenei          = "draenei",
+    Worgen             = "worgen",             Goblin           = "goblin",
+    Pandaren           = "pandaren",           Nightborne       = "nightborne",
+    HighmountainTauren = "highmountain_tauren", VoidElf         = "void_elf",
+    LightforgedDraenei = "lightforged_draenei", DarkIronDwarf   = "dark_iron_dwarf",
+    ZandalariTroll     = "zandalari_troll",    KulTiran         = "kul_tiran",
+    Mechagnome         = "mechagnome",         Vulpera          = "vulpera",
+    MagharOrc          = "maghar_orc",         Dracthyr         = "dracthyr",
+    Earthen            = "earthen",
+}
+
+-- classFilename (second return of UnitClass) → SimC class name
+local SIMC_CLASS = {
+    DEATHKNIGHT = "death_knight",  DEMONHUNTER = "demon_hunter",
+    DRUID       = "druid",         EVOKER      = "evoker",
+    HUNTER      = "hunter",        MAGE        = "mage",
+    MONK        = "monk",          PALADIN     = "paladin",
+    PRIEST      = "priest",        ROGUE       = "rogue",
+    SHAMAN      = "shaman",        WARLOCK     = "warlock",
+    WARRIOR     = "warrior",
+}
+
+-- WoW spec ID → SimC spec name
+local SIMC_SPEC = {
+    [250]="blood",        [251]="frost",         [252]="unholy",
+    [577]="havoc",        [581]="vengeance",
+    [102]="balance",      [103]="feral",         [104]="guardian",     [105]="restoration",
+    [1467]="devastation", [1468]="preservation", [1473]="augmentation",
+    [253]="beast_mastery",[254]="marksmanship",  [255]="survival",
+    [62]="arcane",        [63]="fire",            [64]="frost",
+    [268]="brewmaster",   [270]="mistweaver",    [269]="windwalker",
+    [65]="holy",          [66]="protection",     [70]="retribution",
+    [256]="discipline",   [257]="holy",          [258]="shadow",
+    [259]="assassination",[260]="outlaw",        [261]="subtlety",
+    [262]="elemental",    [263]="enhancement",   [264]="restoration",
+    [265]="affliction",   [266]="demonology",    [267]="destruction",
+    [71]="arms",          [72]="fury",           [73]="protection",
+}
+
+local REGION_MAP = { [1]="us", [2]="kr", [3]="eu", [4]="tw", [5]="cn" }
+
+-- Parse a WoW item hyperlink into a SimC item field string.
+-- TWW link format (colon-delimited after "item:"):
+--   1:itemID  2:enchantID  3-6:gemIDs  7:suffixID  8:uniqueID  9:level
+--   10:specID  11:upgradeLevelID  12:difficultyID  13:numBonusIDs  14+:bonusIDs
+--   then numModifiers, then modifier type/value pairs
+local function ItemLinkToSimC(link)
+    if not link then return nil end
+    local itemStr = link:match("|Hitem:([^|]+)|h")
+    if not itemStr then return nil end
+
+    local f = {}
+    for v in (itemStr .. ":"):gmatch("([^:]*):") do
+        f[#f + 1] = tonumber(v) or 0
+    end
+
+    local id = f[1]
+    if not id or id == 0 then return nil end
+
+    local parts = { "id=" .. id }
+
+    if (f[2] or 0) > 0 then
+        parts[#parts + 1] = "enchant_id=" .. f[2]
+    end
+
+    local gems = {}
+    for i = 3, 6 do
+        if (f[i] or 0) > 0 then gems[#gems + 1] = f[i] end
+    end
+    if #gems > 0 then parts[#parts + 1] = "gem_id=" .. table.concat(gems, "/") end
+
+    local numBonus = f[13] or 0
+    if numBonus > 0 then
+        local bonusIds = {}
+        for i = 14, 13 + numBonus do
+            if (f[i] or 0) > 0 then bonusIds[#bonusIds + 1] = f[i] end
+        end
+        if #bonusIds > 0 then
+            parts[#parts + 1] = "bonus_id=" .. table.concat(bonusIds, "/")
+        end
+    end
+
+    return table.concat(parts, ",")
+end
+
+-- Build the complete SimC profile string for the current character.
+local function BuildSimCProfile()
+    local name             = UnitName("player") or "unknown"
+    local _, classFile     = UnitClass("player")
+    local _, raceFile      = UnitRace("player")
+    local level            = UnitLevel("player") or 80
+    local simcClass        = SIMC_CLASS[classFile]  or classFile:lower():gsub(" ", "_")
+    local simcRace         = SIMC_RACE[raceFile]    or raceFile:lower():gsub(" ", "_")
+    local realm            = (GetRealmName() or "Unknown"):gsub("%s+", "")
+    local regionNum        = GetCurrentRegion and GetCurrentRegion() or 1
+    local region           = REGION_MAP[regionNum] or "us"
+
+    local specIdx          = GetSpecialization() or 1
+    local specId, _, _, _, role = GetSpecializationInfo(specIdx)
+    local simcSpec         = SIMC_SPEC[specId] or "unknown"
+    local simcRole         = (role == "HEALER") and "heal" or (role == "TANK") and "tank" or "attack"
+
+    local talentStr = ""
+    if C_ClassTalents and C_ClassTalents.GetActiveConfigID then
+        local cfgID = C_ClassTalents.GetActiveConfigID()
+        if cfgID and C_ClassTalents.GetConfigExportString then
+            talentStr = C_ClassTalents.GetConfigExportString(cfgID) or ""
+        end
+    end
+
+    local lines = {
+        "# Simdragosa Export — " .. date("%Y-%m-%d"),
+        string.format('%s="%s-%s"', simcClass, name, realm),
+        "level=" .. level,
+        "race=" .. simcRace,
+        "region=" .. region,
+        "server=" .. realm:lower(),
+        "role=" .. simcRole,
+    }
+    if talentStr ~= "" then lines[#lines + 1] = "talents=" .. talentStr end
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "spec=" .. simcSpec
+    lines[#lines + 1] = ""
+
+    local slotOrder = { 1,2,3,5,6,7,8,9,10,11,12,13,14,15,16,17 }
+    for _, slotID in ipairs(slotOrder) do
+        local slotName = SIMC_SLOTS[slotID]
+        if slotName then
+            local link     = GetInventoryItemLink("player", slotID)
+            local simcItem = link and ItemLinkToSimC(link)
+            if simcItem then
+                lines[#lines + 1] = slotName .. "=," .. simcItem
+            end
+        end
+    end
+
+    return table.concat(lines, "\n") .. "\n"
+end
+
+-- Run the export: store into SimdragosaConfig.exports[charKey] (persisted as SavedVariables).
+local function DoExport()
+    local charKey = GetCharKey()
+    local profile = BuildSimCProfile()
+    local specIdx = GetSpecialization() or 1
+    local specId  = select(1, GetSpecializationInfo(specIdx))
+    local spec    = SIMC_SPEC[specId] or "unknown"
+
+    SimdragosaConfig.exports = SimdragosaConfig.exports or {}
+    SimdragosaConfig.exports[charKey] = {
+        simc      = profile,
+        spec      = spec,
+        timestamp = time(),
+        enabled   = true,
+    }
+
+    print(C.label .. ADDON .. C.reset
+        .. ": SimC export stored for "
+        .. C.hi .. charKey .. C.reset
+        .. " (" .. spec .. ")."
+    )
+    print("  " .. C.low .. "/reload to flush to disk, then the Simdragosa app will detect it." .. C.reset)
+end
+
+-- Opt out the current character from auto-detection by the standalone.
+local function DoExportOff()
+    local charKey = GetCharKey()
+    SimdragosaConfig.exports = SimdragosaConfig.exports or {}
+    local existing = SimdragosaConfig.exports[charKey]
+    if existing then
+        existing.enabled = false
+    else
+        SimdragosaConfig.exports[charKey] = { enabled = false, timestamp = time() }
+    end
+    print(C.label .. ADDON .. C.reset .. ": auto-sim opt-out set for " .. C.hi .. charKey .. C.reset .. ".")
+end
+
+-- ---------------------------------------------------------------------------
 -- Slash commands
 -- ---------------------------------------------------------------------------
 
@@ -636,7 +831,11 @@ SLASH_SIMDRAGOSA2 = "/sdr"
 SlashCmdList["SIMDRAGOSA"] = function(msg)
     local cmd = msg:lower():match("^%s*(%S+)")
 
-    if cmd == "results" or cmd == "r" then
+    if cmd == "export" then
+        local sub = msg:lower():match("^%s*%S+%s+(%S+)")
+        if sub == "off" then DoExportOff() else DoExport() end
+
+    elseif cmd == "results" or cmd == "r" then
         RW_Toggle()
 
     elseif cmd == "toggle" then
@@ -727,6 +926,8 @@ SlashCmdList["SIMDRAGOSA"] = function(msg)
 
     else
         print(C.label .. ADDON .. C.reset .. " commands:")
+        print("  /sdr export            — capture SimC profile; /reload to flush to disk")
+        print("  /sdr export off        — opt this character out of auto-sim detection")
         print("  /sdr results           — open/close the upgrade results window")
         print("  /sdr toggle            — show/hide tooltip lines")
         print("  /sdr status            — show stored item count for your character")
