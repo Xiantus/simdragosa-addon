@@ -346,9 +346,9 @@ local function RW_GetOrCreateRow(idx)
     barBg:SetColorTexture(0.12, 0.12, 0.12, 1)
     row.barBg = barBg
 
-    -- DPS bar fill
-    local barFill = row:CreateTexture(nil, "ARTWORK")
-    barFill:SetPoint("LEFT", barBg, "LEFT", 0, 0)
+    -- DPS bar fill (OVERLAY so it always draws on top of the background)
+    local barFill = row:CreateTexture(nil, "OVERLAY")
+    barFill:SetPoint("LEFT", row, "LEFT", RW_NAME_W + 8, -5)
     barFill:SetHeight(9)
     barFill:SetWidth(1)
     row.barFill = barFill
