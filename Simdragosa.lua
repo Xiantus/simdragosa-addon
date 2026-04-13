@@ -917,10 +917,37 @@ local function DoExport()
         return
     end
 
-    -- Nothing found on screen — check if the SimC addon is even loaded
+    -- Nothing captured yet — if the SimC addon is loaded, open its window automatically
+    -- and re-capture after a short delay so the user doesn't have to type /simc first.
     local simcLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded("SimulationCraft"))
                     or (IsAddOnLoaded and IsAddOnLoaded("SimulationCraft"))
     if simcLoaded then
+        -- Find the SimC slash command handler (same keys we hook elsewhere).
+        local simcCmd
+        for _, key in ipairs({ "SIMULATIONCRAFT", "SIMC", "SC2", "SIMULATIONCRAFT2" }) do
+            if SlashCmdList[key] then simcCmd = SlashCmdList[key]; break end
+        end
+        if simcCmd then
+            print(C.label .. ADDON .. C.reset .. ": Opening SimulationCraft window…")
+            simcCmd("")  -- opens /simc
+            C_Timer.After(0.3, function()
+                local text = ""
+                local eb2 = _G["SimulationCraftEditBox"]
+                if eb2 then text = eb2:GetText() or "" end
+                if text == "" or not text:find("\nspec=") then
+                    text = SIMC_ScanForProfile(UIParent) or ""
+                end
+                if text ~= "" and text:find("\nspec=") then
+                    SIMC_StoreProfile(text)
+                else
+                    print(C.label .. ADDON .. C.reset
+                        .. ": SimulationCraft window opened but no profile found yet."
+                        .. " Wait for it to populate, then run /sdr export again.")
+                end
+            end)
+            return
+        end
+        -- SimC loaded but no slash command found — ask user to open manually.
         print(C.label .. ADDON .. C.reset
             .. ": Type " .. C.hi .. "/simc" .. C.reset
             .. " to open the export window first, then run /sdr export.")
