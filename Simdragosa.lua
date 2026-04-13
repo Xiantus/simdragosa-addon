@@ -101,6 +101,16 @@ frame:SetScript("OnEvent", function(self, event, addonName)
     -- SimdragosaDB is populated by SimdragosaData.lua (loaded before this file).
     -- Fall back to empty table if the data file doesn't exist yet.
     SimdragosaDB = SimdragosaDB or {}
+
+    -- Build the results window now that config is initialised.
+    RW_CreateFrame()
+
+    -- Restore saved window position.
+    if SimdragosaConfig.windowPos and SimdragosaResultsFrame then
+        local p = SimdragosaConfig.windowPos
+        SimdragosaResultsFrame:ClearAllPoints()
+        SimdragosaResultsFrame:SetPoint(p[1], UIParent, p[2], p[3], p[4])
+    end
 end)
 
 -- ---------------------------------------------------------------------------
@@ -188,6 +198,630 @@ TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tool
 end)
 
 -- ---------------------------------------------------------------------------
+-- Results Window
+-- ---------------------------------------------------------------------------
+
+local RW_W      = 370    -- frame width
+local RW_H      = 450    -- frame height
+local RW_ROW_H  = 22     -- row height (px)
+local RW_NAME_W = 165    -- item name column width
+local RW_BAR_W  = 105    -- DPS bar max width
+local RW_DPS_W  = 62     -- DPS value column width
+
+local RW_TRACK_LABELS = { champion = "Champion", heroic = "Heroic", mythic = "Mythic" }
+local RW_TRACK_ORDER  = { "champion", "heroic", "mythic" }
+
+-- rw holds all mutable state for the results window.
+local rw = {
+    frame      = nil,
+    content    = nil,
+    rows       = {},   -- pool of reusable row sub-frames
+    specLabel  = nil,
+    trackLabel = nil,
+    footer     = nil,
+    charKey    = nil,
+    specList   = {},
+    specIdx    = 1,
+    trackList  = {},
+    trackIdx   = 1,
+}
+
+-- ── Data helpers ──────────────────────────────────────────────────────────────
+
+local function RW_GetSpecs(charKey)
+    if not SimdragosaDB then return {} end
+    local charData = SimdragosaDB[charKey]
+    if not charData then return {} end
+    local seen, list = {}, {}
+    for _, entry in pairs(charData) do
+        if entry.specs then
+            for _, sd in ipairs(entry.specs) do
+                local s = sd.spec and sd.spec:lower() or ""
+                if s ~= "" and not seen[s] then
+                    seen[s] = true; list[#list + 1] = s
+                end
+            end
+        end
+    end
+    table.sort(list)
+    return list
+end
+
+local function RW_GetTracks(charKey, spec)
+    if not SimdragosaDB then return {} end
+    local charData = SimdragosaDB[charKey]
+    if not charData then return {} end
+    local seen = {}
+    for _, entry in pairs(charData) do
+        if entry.specs then
+            for _, sd in ipairs(entry.specs) do
+                local sdSpec = sd.spec and sd.spec:lower() or ""
+                if spec == nil or sdSpec == spec then
+                    for _, t in ipairs(RW_TRACK_ORDER) do
+                        if sd[t] and sd[t] > 0 then seen[t] = true end
+                    end
+                end
+            end
+        end
+    end
+    local tracks = {}
+    for _, t in ipairs(RW_TRACK_ORDER) do
+        if seen[t] then tracks[#tracks + 1] = t end
+    end
+    return tracks
+end
+
+local function RW_BuildList(charKey, spec, track)
+    if not SimdragosaDB or not track then return {} end
+    local charData = SimdragosaDB[charKey]
+    if not charData then return {} end
+    local list = {}
+    for itemID, entry in pairs(charData) do
+        local bestDPS = nil
+        if entry.specs then
+            for _, sd in ipairs(entry.specs) do
+                local sdSpec = sd.spec and sd.spec:lower() or ""
+                if (spec == nil or sdSpec == spec) and sd[track] and sd[track] > 0 then
+                    if bestDPS == nil or sd[track] > bestDPS then
+                        bestDPS = sd[track]
+                    end
+                end
+            end
+        end
+        if bestDPS then
+            list[#list + 1] = {
+                itemID  = tonumber(itemID),
+                name    = entry.name or ("Item #" .. tostring(itemID)),
+                dps     = bestDPS,
+                ilvl    = entry.ilvl,
+                updated = entry.updated,
+            }
+        end
+    end
+    table.sort(list, function(a, b) return a.dps > b.dps end)
+    return list
+end
+
+-- ── Row helpers ───────────────────────────────────────────────────────────────
+
+local function RW_FormatDPS(dps)
+    if dps >= 1000 then return string.format("+%.1fk", dps / 1000) end
+    return string.format("+%.0f", dps)
+end
+
+local function RW_GetOrCreateRow(idx)
+    if rw.rows[idx] then return rw.rows[idx] end
+
+    local row = CreateFrame("Button", nil, rw.content)
+    row:SetHeight(RW_ROW_H)
+    row:SetPoint("LEFT",  rw.content, "LEFT",  0, 0)
+    row:SetPoint("RIGHT", rw.content, "RIGHT", -4, 0)
+
+    -- Alternating row tint
+    local bg = row:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    row.bg = bg
+
+    -- Item name
+    local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    nameText:SetPoint("LEFT", row, "LEFT", 4, 0)
+    nameText:SetWidth(RW_NAME_W)
+    nameText:SetJustifyH("LEFT")
+    nameText:SetWordWrap(false)
+    row.nameText = nameText
+
+    -- DPS bar background
+    local barBg = row:CreateTexture(nil, "ARTWORK")
+    barBg:SetPoint("LEFT", row, "LEFT", RW_NAME_W + 8, -5)
+    barBg:SetSize(RW_BAR_W, 9)
+    barBg:SetColorTexture(0.12, 0.12, 0.12, 1)
+    row.barBg = barBg
+
+    -- DPS bar fill
+    local barFill = row:CreateTexture(nil, "ARTWORK")
+    barFill:SetPoint("LEFT", barBg, "LEFT", 0, 0)
+    barFill:SetHeight(9)
+    barFill:SetWidth(1)
+    row.barFill = barFill
+
+    -- DPS value
+    local dpsText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    dpsText:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+    dpsText:SetWidth(RW_DPS_W)
+    dpsText:SetJustifyH("RIGHT")
+    row.dpsText = dpsText
+
+    -- Tooltip on hover / shift-click to link
+    row:SetScript("OnEnter", function(self)
+        if self.itemID then
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetItemByID(self.itemID)
+            GameTooltip:Show()
+        end
+        self.bg:SetColorTexture(0.25, 0.20, 0.45, 0.5)
+    end)
+    row:SetScript("OnLeave", function(self)
+        GameTooltip:Hide()
+        if self.oddRow then
+            self.bg:SetColorTexture(0.08, 0.08, 0.08, 0.3)
+        else
+            self.bg:SetColorTexture(0, 0, 0, 0)
+        end
+    end)
+    row:SetScript("OnClick", function(self)
+        if self.itemID and IsShiftKeyDown() then
+            local _, link = GetItemInfo(self.itemID)
+            if link then ChatEdit_InsertLink(link) end
+        end
+    end)
+
+    rw.rows[idx] = row
+    return row
+end
+
+-- ── Refresh (re-populates visible rows) ──────────────────────────────────────
+
+local function RW_Refresh()
+    if not rw.frame or not rw.frame:IsShown() then return end
+
+    local spec  = rw.specList[rw.specIdx]
+    local track = rw.trackList[rw.trackIdx]
+
+    -- Cycle button labels
+    local specDisplay  = spec  and (spec:sub(1,1):upper()  .. spec:sub(2))  or "All Specs"
+    local trackDisplay = track and (RW_TRACK_LABELS[track] or track) or "—"
+    rw.specLabel:SetText(specDisplay)
+    rw.trackLabel:SetText(trackDisplay)
+
+    if not track then
+        for _, row in ipairs(rw.rows) do row:Hide() end
+        rw.content:SetHeight(20)
+        rw.footer:SetText(C.low .. "No sim data found. Run a sim and /reload." .. C.reset)
+        return
+    end
+
+    local list   = RW_BuildList(rw.charKey, spec, track)
+    local maxDPS = (list[1] and list[1].dps) or 1
+    local count  = math.min(#list, 40)
+
+    rw.content:SetHeight(math.max(count * RW_ROW_H, 20))
+
+    for i = 1, count do
+        local item = list[i]
+        local row  = RW_GetOrCreateRow(i)
+        row.itemID  = item.itemID
+        row.oddRow  = (i % 2 == 1)
+
+        -- Background alternating tint
+        if row.oddRow then
+            row.bg:SetColorTexture(0.08, 0.08, 0.08, 0.3)
+        else
+            row.bg:SetColorTexture(0, 0, 0, 0)
+        end
+
+        row:SetPoint("TOP", rw.content, "TOP", 0, -(i - 1) * RW_ROW_H)
+
+        -- Name (strip quotes that can appear in Lua names)
+        local displayName = item.name:gsub('"', '')
+        row.nameText:SetText(displayName)
+
+        -- Bar
+        local pct   = math.max(0.02, item.dps / maxDPS)
+        local fillW = math.max(2, math.floor(RW_BAR_W * pct))
+        row.barFill:SetWidth(fillW)
+        if item.dps >= THRESHOLD_HIGH then
+            row.barFill:SetColorTexture(0.29, 0.87, 0.50, 0.9)
+        elseif item.dps >= THRESHOLD_MEDIUM then
+            row.barFill:SetColorTexture(0.98, 0.75, 0.14, 0.9)
+        else
+            row.barFill:SetColorTexture(0.47, 0.47, 0.63, 0.9)
+        end
+
+        -- DPS value
+        local col = ColourForDPS(item.dps)
+        row.dpsText:SetText(col .. RW_FormatDPS(item.dps) .. C.reset)
+
+        row:Show()
+    end
+
+    -- Hide unused pooled rows
+    for i = count + 1, #rw.rows do rw.rows[i]:Hide() end
+
+    -- Footer
+    local newest = ""
+    for _, item in ipairs(list) do
+        if item.updated and item.updated > newest then newest = item.updated end
+    end
+    local whenStr = newest ~= "" and FormatStaleness(newest) or "unknown"
+    rw.footer:SetText(string.format(
+        "%s%d upgrade%s  ·  simmed %s%s",
+        C.low, #list, #list ~= 1 and "s" or "", whenStr, C.reset
+    ))
+end
+
+-- ── Cycle spec / track ────────────────────────────────────────────────────────
+
+local function RW_CycleSpec(dir)
+    if #rw.specList == 0 then return end
+    rw.specIdx   = (rw.specIdx - 1 + dir + #rw.specList) % #rw.specList + 1
+    rw.trackList = RW_GetTracks(rw.charKey, rw.specList[rw.specIdx])
+    rw.trackIdx  = 1
+    RW_Refresh()
+end
+
+local function RW_CycleTrack(dir)
+    if #rw.trackList == 0 then return end
+    rw.trackIdx = (rw.trackIdx - 1 + dir + #rw.trackList) % #rw.trackList + 1
+    RW_Refresh()
+end
+
+-- ── Open / toggle ─────────────────────────────────────────────────────────────
+
+local function RW_Open()
+    rw.charKey   = GetCharKey()
+    rw.specList  = RW_GetSpecs(rw.charKey)
+    rw.specIdx   = 1
+    rw.trackList = RW_GetTracks(rw.charKey, rw.specList[1])
+    rw.trackIdx  = 1
+    rw.frame:Show()
+    RW_Refresh()
+end
+
+local function RW_Toggle()
+    if rw.frame:IsShown() then rw.frame:Hide() else RW_Open() end
+end
+
+-- ── Frame construction (called once on ADDON_LOADED) ──────────────────────────
+
+function RW_CreateFrame()
+    local f = CreateFrame("Frame", "SimdragosaResultsFrame", UIParent, "BackdropTemplate")
+    f:SetSize(RW_W, RW_H)
+    f:SetPoint("CENTER")
+    f:SetMovable(true)
+    f:SetClampedToScreen(true)
+    f:SetFrameStrata("DIALOG")
+    f:EnableMouse(true)
+    f:SetResizable(false)
+    f:RegisterForDrag("LeftButton")
+
+    local function SavePos()
+        local pt, _, rpt, x, y = f:GetPoint()
+        SimdragosaConfig.windowPos = { pt, rpt, x, y }
+    end
+    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStop",  function(self) self:StopMovingOrSizing(); SavePos() end)
+
+    f:SetBackdrop({
+        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        edgeSize = 16,
+        insets   = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    f:SetBackdropColor(0, 0, 0, 0.93)
+    f:SetBackdropBorderColor(0.38, 0.32, 0.65, 1)
+
+    -- Title
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -12)
+    title:SetText(C.label .. "SIMDRAGOSA" .. C.reset .. "  RESULTS")
+
+    -- Close button
+    local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+    closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
+    closeBtn:SetScript("OnClick", function() f:Hide() end)
+
+    -- Separator 1 (below title)
+    local sep1 = f:CreateTexture(nil, "ARTWORK")
+    sep1:SetPoint("TOPLEFT",  f, "TOPLEFT",  12, -28)
+    sep1:SetPoint("TOPRIGHT", f, "TOPRIGHT", -12, -28)
+    sep1:SetHeight(1)
+    sep1:SetColorTexture(0.38, 0.32, 0.65, 0.6)
+
+    -- ── Spec / Track cycle rows ───────────────────────────────────────────────
+    local function MakeCycleRow(yOff, prefix, cycleFn)
+        local lbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("TOPLEFT", f, "TOPLEFT", 14, yOff)
+        lbl:SetText(C.low .. prefix .. C.reset)
+        lbl:SetWidth(46)
+
+        local prevBtn = CreateFrame("Button", nil, f)
+        prevBtn:SetSize(16, 20)
+        prevBtn:SetPoint("LEFT", lbl, "RIGHT", 2, 0)
+        prevBtn:SetNormalFontObject("GameFontNormal")
+        prevBtn:SetText(C.label .. "‹" .. C.reset)
+        prevBtn:SetScript("OnClick", function() cycleFn(-1) end)
+
+        local valLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        valLbl:SetPoint("LEFT", prevBtn, "RIGHT", 3, 0)
+        valLbl:SetWidth(120)
+        valLbl:SetJustifyH("LEFT")
+        valLbl:SetText("—")
+
+        local nextBtn = CreateFrame("Button", nil, f)
+        nextBtn:SetSize(16, 20)
+        nextBtn:SetPoint("LEFT", valLbl, "RIGHT", 3, 0)
+        nextBtn:SetNormalFontObject("GameFontNormal")
+        nextBtn:SetText(C.label .. "›" .. C.reset)
+        nextBtn:SetScript("OnClick", function() cycleFn(1) end)
+
+        return valLbl
+    end
+
+    rw.specLabel  = MakeCycleRow(-36, "Spec:",  RW_CycleSpec)
+    rw.trackLabel = MakeCycleRow(-56, "Track:", RW_CycleTrack)
+
+    -- Separator 2 (below controls)
+    local sep2 = f:CreateTexture(nil, "ARTWORK")
+    sep2:SetPoint("TOPLEFT",  f, "TOPLEFT",  12, -76)
+    sep2:SetPoint("TOPRIGHT", f, "TOPRIGHT", -12, -76)
+    sep2:SetHeight(1)
+    sep2:SetColorTexture(0.38, 0.32, 0.65, 0.4)
+
+    -- Column headers
+    local hdrName = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    hdrName:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -82)
+    hdrName:SetText(C.low .. "UPGRADE" .. C.reset)
+
+    local hdrDPS = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    hdrDPS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -8, -82)
+    hdrDPS:SetText(C.low .. "DPS GAIN" .. C.reset)
+
+    -- ── Scroll frame ─────────────────────────────────────────────────────────
+    local scrollFrame = CreateFrame("ScrollFrame", "SimdragosaResultsScroll", f)
+    scrollFrame:SetPoint("TOPLEFT",     f, "TOPLEFT",     12,  -98)
+    scrollFrame:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -28,  30)
+
+    local content = CreateFrame("Frame", nil, scrollFrame)
+    content:SetWidth(RW_W - 40)
+    content:SetHeight(200)
+    scrollFrame:SetScrollChild(content)
+    rw.content = content
+
+    -- Scroll bar
+    local sb = CreateFrame("Slider", nil, f, "UIPanelScrollBarTemplate")
+    sb:SetPoint("TOPRIGHT",    f, "TOPRIGHT",    -8, -104)
+    sb:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -8,   34)
+    sb:SetMinMaxValues(0, 1)
+    sb:SetValueStep(RW_ROW_H)
+    sb:SetScript("OnValueChanged", function(self, val)
+        scrollFrame:SetVerticalScroll(val)
+    end)
+    scrollFrame:SetScript("OnScrollRangeChanged", function(self, _, yRange)
+        sb:SetMinMaxValues(0, yRange)
+        sb:SetValue(math.min(sb:GetValue(), yRange))
+    end)
+    scrollFrame:EnableMouseWheel(true)
+    scrollFrame:SetScript("OnMouseWheel", function(self, delta)
+        sb:SetValue(sb:GetValue() - delta * RW_ROW_H * 3)
+    end)
+
+    -- ── Footer ───────────────────────────────────────────────────────────────
+    local footer = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    footer:SetPoint("BOTTOMLEFT",  f, "BOTTOMLEFT",  14, 12)
+    footer:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -28, 12)
+    footer:SetJustifyH("LEFT")
+    rw.footer = footer
+
+    f:Hide()
+    rw.frame = f
+end
+
+-- ---------------------------------------------------------------------------
+-- SimC Export  (/sdr export)
+-- ---------------------------------------------------------------------------
+
+local SIMC_SLOTS = {
+    [1]  = "head",      [2]  = "neck",    [3]  = "shoulder",
+    [5]  = "chest",     [6]  = "waist",   [7]  = "legs",
+    [8]  = "feet",      [9]  = "wrist",   [10] = "hands",
+    [11] = "finger1",   [12] = "finger2",
+    [13] = "trinket1",  [14] = "trinket2",
+    [15] = "back",      [16] = "main_hand", [17] = "off_hand",
+}
+
+-- raceFilename (second return of UnitRace) → SimC race name
+local SIMC_RACE = {
+    Human              = "human",              Orc              = "orc",
+    Dwarf              = "dwarf",              NightElf         = "night_elf",
+    Undead             = "undead",             Tauren           = "tauren",
+    Gnome              = "gnome",              Troll            = "troll",
+    BloodElf           = "blood_elf",          Draenei          = "draenei",
+    Worgen             = "worgen",             Goblin           = "goblin",
+    Pandaren           = "pandaren",           Nightborne       = "nightborne",
+    HighmountainTauren = "highmountain_tauren", VoidElf         = "void_elf",
+    LightforgedDraenei = "lightforged_draenei", DarkIronDwarf   = "dark_iron_dwarf",
+    ZandalariTroll     = "zandalari_troll",    KulTiran         = "kul_tiran",
+    Mechagnome         = "mechagnome",         Vulpera          = "vulpera",
+    MagharOrc          = "maghar_orc",         Dracthyr         = "dracthyr",
+    Earthen            = "earthen",
+}
+
+-- classFilename (second return of UnitClass) → SimC class name
+local SIMC_CLASS = {
+    DEATHKNIGHT = "death_knight",  DEMONHUNTER = "demon_hunter",
+    DRUID       = "druid",         EVOKER      = "evoker",
+    HUNTER      = "hunter",        MAGE        = "mage",
+    MONK        = "monk",          PALADIN     = "paladin",
+    PRIEST      = "priest",        ROGUE       = "rogue",
+    SHAMAN      = "shaman",        WARLOCK     = "warlock",
+    WARRIOR     = "warrior",
+}
+
+-- WoW spec ID → SimC spec name
+local SIMC_SPEC = {
+    [250]="blood",        [251]="frost",         [252]="unholy",
+    [577]="havoc",        [581]="vengeance",
+    [102]="balance",      [103]="feral",         [104]="guardian",     [105]="restoration",
+    [1467]="devastation", [1468]="preservation", [1473]="augmentation",
+    [253]="beast_mastery",[254]="marksmanship",  [255]="survival",
+    [62]="arcane",        [63]="fire",            [64]="frost",
+    [268]="brewmaster",   [270]="mistweaver",    [269]="windwalker",
+    [65]="holy",          [66]="protection",     [70]="retribution",
+    [256]="discipline",   [257]="holy",          [258]="shadow",
+    [259]="assassination",[260]="outlaw",        [261]="subtlety",
+    [262]="elemental",    [263]="enhancement",   [264]="restoration",
+    [265]="affliction",   [266]="demonology",    [267]="destruction",
+    [71]="arms",          [72]="fury",           [73]="protection",
+}
+
+local REGION_MAP = { [1]="us", [2]="kr", [3]="eu", [4]="tw", [5]="cn" }
+
+-- Parse a WoW item hyperlink into a SimC item field string.
+-- TWW link format (colon-delimited after "item:"):
+--   1:itemID  2:enchantID  3-6:gemIDs  7:suffixID  8:uniqueID  9:level
+--   10:specID  11:upgradeLevelID  12:difficultyID  13:numBonusIDs  14+:bonusIDs
+--   then numModifiers, then modifier type/value pairs
+local function ItemLinkToSimC(link)
+    if not link then return nil end
+    local itemStr = link:match("|Hitem:([^|]+)|h")
+    if not itemStr then return nil end
+
+    local f = {}
+    for v in (itemStr .. ":"):gmatch("([^:]*):") do
+        f[#f + 1] = tonumber(v) or 0
+    end
+
+    local id = f[1]
+    if not id or id == 0 then return nil end
+
+    local parts = { "id=" .. id }
+
+    if (f[2] or 0) > 0 then
+        parts[#parts + 1] = "enchant_id=" .. f[2]
+    end
+
+    local gems = {}
+    for i = 3, 6 do
+        if (f[i] or 0) > 0 then gems[#gems + 1] = f[i] end
+    end
+    if #gems > 0 then parts[#parts + 1] = "gem_id=" .. table.concat(gems, "/") end
+
+    local numBonus = f[13] or 0
+    if numBonus > 0 then
+        local bonusIds = {}
+        for i = 14, 13 + numBonus do
+            if (f[i] or 0) > 0 then bonusIds[#bonusIds + 1] = f[i] end
+        end
+        if #bonusIds > 0 then
+            parts[#parts + 1] = "bonus_id=" .. table.concat(bonusIds, "/")
+        end
+    end
+
+    return table.concat(parts, ",")
+end
+
+-- Build the complete SimC profile string for the current character.
+local function BuildSimCProfile()
+    local name             = UnitName("player") or "unknown"
+    local _, classFile     = UnitClass("player")
+    local _, raceFile      = UnitRace("player")
+    local level            = UnitLevel("player") or 80
+    local simcClass        = SIMC_CLASS[classFile]  or classFile:lower():gsub(" ", "_")
+    local simcRace         = SIMC_RACE[raceFile]    or raceFile:lower():gsub(" ", "_")
+    local realm            = (GetRealmName() or "Unknown"):gsub("%s+", "")
+    local regionNum        = GetCurrentRegion and GetCurrentRegion() or 1
+    local region           = REGION_MAP[regionNum] or "us"
+
+    local specIdx          = GetSpecialization() or 1
+    local specId, _, _, _, role = GetSpecializationInfo(specIdx)
+    local simcSpec         = SIMC_SPEC[specId] or "unknown"
+    local simcRole         = (role == "HEALER") and "heal" or (role == "TANK") and "tank" or "attack"
+
+    local talentStr = ""
+    if C_ClassTalents and C_ClassTalents.GetActiveConfigID then
+        local cfgID = C_ClassTalents.GetActiveConfigID()
+        if cfgID and C_ClassTalents.GetConfigExportString then
+            talentStr = C_ClassTalents.GetConfigExportString(cfgID) or ""
+        end
+    end
+
+    local lines = {
+        "# Simdragosa Export — " .. date("%Y-%m-%d"),
+        string.format('%s="%s-%s"', simcClass, name, realm),
+        "level=" .. level,
+        "race=" .. simcRace,
+        "region=" .. region,
+        "server=" .. realm:lower(),
+        "role=" .. simcRole,
+    }
+    if talentStr ~= "" then lines[#lines + 1] = "talents=" .. talentStr end
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "spec=" .. simcSpec
+    lines[#lines + 1] = ""
+
+    local slotOrder = { 1,2,3,5,6,7,8,9,10,11,12,13,14,15,16,17 }
+    for _, slotID in ipairs(slotOrder) do
+        local slotName = SIMC_SLOTS[slotID]
+        if slotName then
+            local link     = GetInventoryItemLink("player", slotID)
+            local simcItem = link and ItemLinkToSimC(link)
+            if simcItem then
+                lines[#lines + 1] = slotName .. "=," .. simcItem
+            end
+        end
+    end
+
+    return table.concat(lines, "\n") .. "\n"
+end
+
+-- Run the export: store into SimdragosaConfig.exports[charKey] (persisted as SavedVariables).
+local function DoExport()
+    local charKey = GetCharKey()
+    local profile = BuildSimCProfile()
+    local specIdx = GetSpecialization() or 1
+    local specId  = select(1, GetSpecializationInfo(specIdx))
+    local spec    = SIMC_SPEC[specId] or "unknown"
+
+    SimdragosaConfig.exports = SimdragosaConfig.exports or {}
+    SimdragosaConfig.exports[charKey] = {
+        simc      = profile,
+        spec      = spec,
+        timestamp = time(),
+        enabled   = true,
+    }
+
+    print(C.label .. ADDON .. C.reset
+        .. ": SimC export stored for "
+        .. C.hi .. charKey .. C.reset
+        .. " (" .. spec .. ")."
+    )
+    print("  " .. C.low .. "/reload to flush to disk, then the Simdragosa app will detect it." .. C.reset)
+end
+
+-- Opt out the current character from auto-detection by the standalone.
+local function DoExportOff()
+    local charKey = GetCharKey()
+    SimdragosaConfig.exports = SimdragosaConfig.exports or {}
+    local existing = SimdragosaConfig.exports[charKey]
+    if existing then
+        existing.enabled = false
+    else
+        SimdragosaConfig.exports[charKey] = { enabled = false, timestamp = time() }
+    end
+    print(C.label .. ADDON .. C.reset .. ": auto-sim opt-out set for " .. C.hi .. charKey .. C.reset .. ".")
+end
+
+-- ---------------------------------------------------------------------------
 -- Slash commands
 -- ---------------------------------------------------------------------------
 
@@ -197,7 +831,14 @@ SLASH_SIMDRAGOSA2 = "/sdr"
 SlashCmdList["SIMDRAGOSA"] = function(msg)
     local cmd = msg:lower():match("^%s*(%S+)")
 
-    if cmd == "toggle" then
+    if cmd == "export" then
+        local sub = msg:lower():match("^%s*%S+%s+(%S+)")
+        if sub == "off" then DoExportOff() else DoExport() end
+
+    elseif cmd == "results" or cmd == "r" then
+        RW_Toggle()
+
+    elseif cmd == "toggle" then
         SimdragosaConfig.enabled = not SimdragosaConfig.enabled
         local state = SimdragosaConfig.enabled and "enabled" or "disabled"
         print(C.label .. ADDON .. C.reset .. ": tooltip lines " .. state .. ".")
@@ -285,6 +926,9 @@ SlashCmdList["SIMDRAGOSA"] = function(msg)
 
     else
         print(C.label .. ADDON .. C.reset .. " commands:")
+        print("  /sdr export            — capture SimC profile; /reload to flush to disk")
+        print("  /sdr export off        — opt this character out of auto-sim detection")
+        print("  /sdr results           — open/close the upgrade results window")
         print("  /sdr toggle            — show/hide tooltip lines")
         print("  /sdr status            — show stored item count for your character")
         print("  /sdr staleness <n>     — hide sims older than N days (0 = never)")
