@@ -49,6 +49,21 @@ local function GetCharKey()
     return name .. "-" .. realm:gsub("%s+", "")
 end
 
+-- Case-insensitive DB lookup: standalone may save realm in lowercase.
+local function GetCharData(key)
+    if not SimdragosaDB then return nil end
+    if SimdragosaDB[key] then return SimdragosaDB[key] end
+    local keyLower = key:lower()
+    for k, v in pairs(SimdragosaDB) do
+        if k:lower() == keyLower then return v end
+    end
+    return nil
+end
+
+local function CharKeyMatches(dbKey, charKey)
+    return dbKey == charKey or dbKey:lower() == charKey:lower()
+end
+
 local function ColourForDPS(dps)
     if dps >= THRESHOLD_HIGH   then return C.high   end
     if dps >= THRESHOLD_MEDIUM then return C.medium end
@@ -135,7 +150,7 @@ TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tool
     if not itemID or itemID == 0 then return end
 
     local charKey  = GetCharKey()
-    local charData = SimdragosaDB[charKey]
+    local charData = GetCharData(charKey)
     if not charData then return end
 
     local entry = charData[itemID]
@@ -239,7 +254,7 @@ local rw = {
 
 local function RW_GetSpecs(charKey)
     if not SimdragosaDB then return {} end
-    local charData = SimdragosaDB[charKey]
+    local charData = GetCharData(charKey)
     if not charData then return {} end
     local seen, list = {}, {}
     for _, entry in pairs(charData) do
@@ -258,7 +273,7 @@ end
 
 local function RW_GetTracks(charKey, spec)
     if not SimdragosaDB then return {} end
-    local charData = SimdragosaDB[charKey]
+    local charData = GetCharData(charKey)
     if not charData then return {} end
     local seen = {}
     for _, entry in pairs(charData) do
@@ -282,7 +297,7 @@ end
 
 local function RW_BuildList(charKey, spec, track)
     if not SimdragosaDB or not track then return {} end
-    local charData = SimdragosaDB[charKey]
+    local charData = GetCharData(charKey)
     if not charData then return {} end
     local list = {}
     for itemID, entry in pairs(charData) do
@@ -1026,7 +1041,7 @@ SlashCmdList["SIMDRAGOSA"] = function(msg)
 
     elseif cmd == "status" then
         local charKey  = GetCharKey()
-        local charData = SimdragosaDB and SimdragosaDB[charKey]
+        local charData = GetCharData(charKey)
         if not charData then
             print(C.label .. ADDON .. C.reset .. ": no sim data found for " .. charKey .. ".")
             return
@@ -1074,14 +1089,14 @@ SlashCmdList["SIMDRAGOSA"] = function(msg)
         for _, k in ipairs(keys) do
             local count = 0
             for _ in pairs(SimdragosaDB[k]) do count = count + 1 end
-            local match = (k == charKey) and C.green .. " ◄ you" .. C.reset or ""
+            local match = CharKeyMatches(k, charKey) and C.green .. " ◄ you" .. C.reset or ""
             print(string.format("    %s%s%s — %d items%s", C.hi, k, C.reset, count, match))
         end
 
         -- Check a specific item ID if provided
         local itemArg = tonumber(msg:match("%d+"))
         if itemArg then
-            local charData = SimdragosaDB[charKey]
+            local charData = GetCharData(charKey)
             if charData and charData[itemArg] then
                 local e = charData[itemArg]
                 print(string.format("  Item %d%s found%s:", itemArg, C.green, C.reset))
