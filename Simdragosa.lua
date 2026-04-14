@@ -837,9 +837,11 @@ local function SIMC_ScanForProfile(obj, depth)
     depth = depth or 0
     if depth > 6 then return nil end
     -- Some frame types (e.g. ServicesLogoutPopup) have IsShown in their metatable
-    -- but crash when called — use pcall to guard against bad self errors.
-    local ok, shown = pcall(function() return obj:IsShown() end)
-    if not ok or not shown then return nil end
+    -- but crash when called, or return a tainted secure boolean — keep the test
+    -- inside pcall so the tainted value never escapes to addon scope.
+    local shown = false
+    pcall(function() if obj:IsShown() then shown = true end end)
+    if not shown then return nil end
 
     if obj.IsObjectType and obj:IsObjectType("EditBox") then
         local text = obj:GetText() or ""
@@ -919,17 +921,22 @@ local function DoExport()
         end
     end
 
-    -- Fall back: scan the visible frame tree (handles renamed/future SimC versions).
-    local profile = SIMC_ScanForProfile(UIParent)
-    if profile then
-        SIMC_StoreProfile(profile)
-        return
+    -- Only scan the frame tree if SimC is loaded — avoids taint errors from
+    -- traversing protected frames when SimC isn't present.
+    local simcLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded("SimulationCraft"))
+                    or (IsAddOnLoaded and IsAddOnLoaded("SimulationCraft"))
+
+    if simcLoaded then
+        -- Fall back: scan the visible frame tree (handles renamed/future SimC versions).
+        local profile = SIMC_ScanForProfile(UIParent)
+        if profile then
+            SIMC_StoreProfile(profile)
+            return
+        end
     end
 
     -- Nothing captured yet — if the SimC addon is loaded, open its window automatically
     -- and re-capture after a short delay so the user doesn't have to type /simc first.
-    local simcLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded("SimulationCraft"))
-                    or (IsAddOnLoaded and IsAddOnLoaded("SimulationCraft"))
     if simcLoaded then
         -- Find the SimC slash command handler (same keys we hook elsewhere).
         local simcCmd
