@@ -334,6 +334,12 @@ local function RW_SourceDisplay(src)
     if not src or src == ""  then return "All Sources"  end
     if src == "__raids__"    then return "All Raids"    end
     if src == "__dungeons__" then return "All Dungeons" end
+    -- Raidbots stores numeric journal instance IDs — resolve to human name
+    local numId = tonumber(src)
+    if numId then
+        local name = EJ_GetInstanceInfo and EJ_GetInstanceInfo(numId)
+        if name and name ~= "" then return name end
+    end
     return src
 end
 
@@ -504,8 +510,8 @@ local function RW_Refresh()
 
         row:SetPoint("TOP", rw.content, "TOP", 0, -(i - 1) * RW_ROW_H)
 
-        -- Icon
-        local iconPath = GetItemIcon and GetItemIcon(item.itemID)
+        -- Icon (GetItemInfoInstant reads local client DB — no server cache required)
+        local iconPath = select(10, GetItemInfoInstant(item.itemID))
         row.iconTex:SetTexture(iconPath or "Interface\\Icons\\INV_Misc_QuestionMark")
 
         -- Bar
