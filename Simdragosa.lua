@@ -99,20 +99,6 @@ end
 -- Initialisation
 -- ---------------------------------------------------------------------------
 
--- Debounced refresh when item data loads (icons for uncached Droptimizer items)
-local itemRefreshPending = false
-local itemEventFrame = CreateFrame("Frame")
-itemEventFrame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
-itemEventFrame:SetScript("OnEvent", function(self, event)
-    if rw.frame and rw.frame:IsShown() and not itemRefreshPending then
-        itemRefreshPending = true
-        C_Timer.After(0.2, function()
-            itemRefreshPending = false
-            RW_Refresh()
-        end)
-    end
-end)
-
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 
@@ -748,6 +734,21 @@ function RW_CreateFrame()
 
     f:Hide()
     rw.frame = f
+
+    -- Debounced refresh when item data loads (icons for uncached Droptimizer items).
+    -- Registered here so the closure correctly captures the local `rw`.
+    local itemRefreshPending = false
+    local itemEventFrame = CreateFrame("Frame")
+    itemEventFrame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+    itemEventFrame:SetScript("OnEvent", function()
+        if rw.frame:IsShown() and not itemRefreshPending then
+            itemRefreshPending = true
+            C_Timer.After(0.2, function()
+                itemRefreshPending = false
+                RW_Refresh()
+            end)
+        end
+    end)
 end
 
 -- ---------------------------------------------------------------------------
