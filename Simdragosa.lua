@@ -99,6 +99,20 @@ end
 -- Initialisation
 -- ---------------------------------------------------------------------------
 
+-- Debounced refresh when item data loads (icons for uncached Droptimizer items)
+local itemRefreshPending = false
+local itemEventFrame = CreateFrame("Frame")
+itemEventFrame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+itemEventFrame:SetScript("OnEvent", function(self, event)
+    if rw.frame and rw.frame:IsShown() and not itemRefreshPending then
+        itemRefreshPending = true
+        C_Timer.After(0.2, function()
+            itemRefreshPending = false
+            RW_Refresh()
+        end)
+    end
+end)
+
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 
@@ -334,11 +348,19 @@ local function RW_SourceDisplay(src)
     if not src or src == ""  then return "All Sources"  end
     if src == "__raids__"    then return "All Raids"    end
     if src == "__dungeons__" then return "All Dungeons" end
-    -- Raidbots stores numeric journal instance IDs — resolve to human name
+    -- Raidbots uses numeric IDs in profileset names — try multiple WoW APIs
     local numId = tonumber(src)
     if numId then
-        local name = EJ_GetInstanceInfo and EJ_GetInstanceInfo(numId)
-        if name and name ~= "" then return name end
+        -- Encounter Journal (raid instances and dungeon instances)
+        if EJ_GetInstanceInfo then
+            local name = EJ_GetInstanceInfo(numId)
+            if name and name ~= "" then return name end
+        end
+        -- Challenge Mode map info (M+ dungeon IDs)
+        if C_ChallengeMode and C_ChallengeMode.GetMapInfo then
+            local info = C_ChallengeMode.GetMapInfo(numId)
+            if info and info.name and info.name ~= "" then return info.name end
+        end
     end
     return src
 end
@@ -510,8 +532,12 @@ local function RW_Refresh()
 
         row:SetPoint("TOP", rw.content, "TOP", 0, -(i - 1) * RW_ROW_H)
 
-        -- Icon (GetItemInfoInstant reads local client DB — no server cache required)
+        -- Icon: GetItemInfoInstant for cached items; GetItemInfo queues a server
+        -- request for uncached items and fires GET_ITEM_INFO_RECEIVED when done.
         local iconPath = select(10, GetItemInfoInstant(item.itemID))
+        if not iconPath then
+            GetItemInfo(item.itemID)  -- queue load; RW_Refresh called on event
+        end
         row.iconTex:SetTexture(iconPath or "Interface\\Icons\\INV_Misc_QuestionMark")
 
         -- Bar
