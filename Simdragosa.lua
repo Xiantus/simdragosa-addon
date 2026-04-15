@@ -243,7 +243,9 @@ local rw = {
     rows        = {},   -- pool of reusable row sub-frames
     specLabel   = nil,
     trackLabel  = nil,
-    sourceLabel = nil,
+    sourceBtn   = nil,   -- dropdown toggle button text label
+    sourcePopup = nil,   -- dropdown popup frame
+    sourceBtns  = {},    -- reusable button pool inside popup
     footer      = nil,
     charKey     = nil,
     specList    = {},
@@ -485,7 +487,7 @@ local function RW_Refresh()
     local trackDisplay  = track and (RW_TRACK_LABELS[track] or track) or "—"
     rw.specLabel:SetText(specDisplay)
     rw.trackLabel:SetText(trackDisplay)
-    rw.sourceLabel:SetText(RW_SourceDisplay(source))
+    rw.sourceBtn:SetText(RW_SourceDisplay(source))
 
     if not track then
         for _, row in ipairs(rw.rows) do row:Hide() end
@@ -574,10 +576,70 @@ local function RW_CycleTrack(dir)
     RW_Refresh()
 end
 
-local function RW_CycleSource(dir)
-    if #rw.sourceList == 0 then return end
-    rw.sourceIdx = (rw.sourceIdx - 1 + dir + #rw.sourceList) % #rw.sourceList + 1
-    RW_Refresh()
+local function RW_OpenSourceDropdown()
+    local popup = rw.sourcePopup
+    if popup:IsShown() then popup:Hide(); return end
+
+    -- Recycle or hide old buttons
+    for _, b in ipairs(rw.sourceBtns) do b:Hide() end
+    rw.sourceBtns = {}
+
+    local ROW_H   = 20
+    local PAD     = 4
+    local yOff    = PAD
+    local popW    = popup:GetWidth()
+
+    -- Find where __dungeons__ starts so individual dungeon entries can be indented
+    local dungeonStart = math.huge
+    for i, src in ipairs(rw.sourceList) do
+        if src == "__dungeons__" then dungeonStart = i; break end
+    end
+
+    for idx, src in ipairs(rw.sourceList) do
+        local isHeader = (src == "__raids__" or src == "__dungeons__")
+        local isIndented = (idx > dungeonStart and not isHeader)
+
+        local btn = CreateFrame("Button", nil, popup)
+        btn:SetHeight(ROW_H)
+        btn:SetPoint("TOPLEFT",  popup, "TOPLEFT",  0,    -yOff)
+        btn:SetPoint("TOPRIGHT", popup, "TOPRIGHT", 0,    -yOff)
+
+        local lbl = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("LEFT",  btn, "LEFT",  isIndented and 20 or 8, 0)
+        lbl:SetPoint("RIGHT", btn, "RIGHT", -8, 0)
+        lbl:SetJustifyH("LEFT")
+        lbl:SetText(RW_SourceDisplay(src))
+
+        if idx == rw.sourceIdx then
+            lbl:SetTextColor(1, 0.85, 0)           -- selected: gold
+        elseif isHeader then
+            lbl:SetTextColor(0.55, 0.50, 0.75)     -- section header: muted purple
+            btn:EnableMouse(false)
+        else
+            lbl:SetTextColor(0.88, 0.88, 0.88)
+        end
+
+        if not isHeader then
+            local capturedIdx = idx
+            btn:SetScript("OnClick", function()
+                rw.sourceIdx = capturedIdx
+                popup:Hide()
+                RW_Refresh()
+            end)
+            btn:SetScript("OnEnter", function(self)
+                self:SetBackdrop({bgFile="Interface\\ChatFrame\\ChatFrameBackground",
+                                  edgeFile="", tile=true, tileSize=8})
+                self:SetBackdropColor(0.28, 0.22, 0.48, 0.55)
+            end)
+            btn:SetScript("OnLeave", function(self) self:SetBackdrop(nil) end)
+        end
+
+        yOff = yOff + ROW_H
+        table.insert(rw.sourceBtns, btn)
+    end
+
+    popup:SetHeight(yOff + PAD)
+    popup:Show()
 end
 
 -- ── Open / toggle ─────────────────────────────────────────────────────────────
@@ -674,9 +736,55 @@ function RW_CreateFrame()
         return valLbl
     end
 
-    rw.specLabel   = MakeCycleRow(-36, "Spec:",   RW_CycleSpec)
-    rw.trackLabel  = MakeCycleRow(-56, "Track:",  RW_CycleTrack)
-    rw.sourceLabel = MakeCycleRow(-76, "Source:", RW_CycleSource)
+    rw.specLabel  = MakeCycleRow(-36, "Spec:",  RW_CycleSpec)
+    rw.trackLabel = MakeCycleRow(-56, "Track:", RW_CycleTrack)
+
+    -- Source dropdown (replaces cycle row — has too many options for cycling)
+    local srcRowLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    srcRowLbl:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -76)
+    srcRowLbl:SetText(C.low .. "Source:" .. C.reset)
+    srcRowLbl:SetWidth(46)
+
+    local srcToggle = CreateFrame("Button", nil, f)
+    srcToggle:SetPoint("LEFT",  srcRowLbl, "RIGHT", 4, 0)
+    srcToggle:SetPoint("RIGHT", f, "RIGHT", -14, 0)
+    srcToggle:SetHeight(18)
+
+    local srcToggleBg = srcToggle:CreateTexture(nil, "BACKGROUND")
+    srcToggleBg:SetAllPoints()
+    srcToggleBg:SetColorTexture(0.10, 0.08, 0.18, 0.85)
+
+    local srcBtnText = srcToggle:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    srcBtnText:SetPoint("LEFT",  srcToggle, "LEFT",  6, 0)
+    srcBtnText:SetPoint("RIGHT", srcToggle, "RIGHT", -14, 0)
+    srcBtnText:SetJustifyH("LEFT")
+    srcBtnText:SetText("All Sources")
+    rw.sourceBtn = srcBtnText
+
+    local srcArrow = srcToggle:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    srcArrow:SetPoint("RIGHT", srcToggle, "RIGHT", -4, 0)
+    srcArrow:SetText(C.label .. "▾" .. C.reset)
+
+    local srcPopup = CreateFrame("Frame", nil, f, "BackdropTemplate")
+    srcPopup:SetPoint("TOPLEFT",  srcToggle, "BOTTOMLEFT",  0, -2)
+    srcPopup:SetPoint("TOPRIGHT", srcToggle, "BOTTOMRIGHT", 0, -2)
+    srcPopup:SetHeight(20)
+    srcPopup:SetFrameStrata("TOOLTIP")
+    srcPopup:SetBackdrop({
+        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        edgeSize = 8,
+        insets   = {left=2, right=2, top=2, bottom=2},
+    })
+    srcPopup:SetBackdropColor(0.06, 0.04, 0.14, 0.97)
+    srcPopup:SetBackdropBorderColor(0.38, 0.32, 0.65, 0.8)
+    srcPopup:Hide()
+    rw.sourcePopup = srcPopup
+
+    srcToggle:SetScript("OnClick", RW_OpenSourceDropdown)
+    srcToggle:SetScript("OnEnter", function() srcToggleBg:SetColorTexture(0.18, 0.14, 0.30, 0.9) end)
+    srcToggle:SetScript("OnLeave", function() srcToggleBg:SetColorTexture(0.10, 0.08, 0.18, 0.85) end)
+    f:HookScript("OnHide", function() srcPopup:Hide() end)
 
     -- Separator 2 (below controls)
     local sep2 = f:CreateTexture(nil, "ARTWORK")
