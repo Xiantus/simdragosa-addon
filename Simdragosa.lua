@@ -624,7 +624,7 @@ local function RW_OpenSourceDropdown()
     end
 
     for idx, src in ipairs(rw.sourceList) do
-        local isHeader = (src == "__raids__" or src == "__dungeons__")
+        local isHeader = (src == "__dungeons__")
         local isIndented = (idx > dungeonStart and not isHeader)
 
         local btn = CreateFrame("Button", nil, popup)
