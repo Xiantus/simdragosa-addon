@@ -236,6 +236,26 @@ local RW_DPS_W  = 62     -- DPS value column width
 local RW_TRACK_LABELS = { champion = "Champion", heroic = "Heroic", mythic = "Mythic" }
 local RW_TRACK_ORDER  = { "champion", "heroic", "mythic" }
 
+-- Static zone-ID → name table for Midnight Season 1 dungeons.
+-- Keys are Wowhead zone/area IDs; updated each season.
+-- Used as last-resort fallback when dynamic WoW APIs return nothing.
+local RW_ZONE_NAMES = {
+    -- Midnight Season 1 — new dungeons
+    [15829] = "Magisters' Terrace",
+    [16395] = "Maisara Caverns",
+    [16573] = "Nexus-Point Xenas",
+    [15808] = "Windrunner Spire",
+    -- Midnight Season 1 — legacy dungeons
+    [14032] = "Algeth'ar Academy",
+    [8910]  = "The Seat of the Triumvirate",
+    [6988]  = "Skyreach",
+    [4813]  = "Pit of Saron",
+}
+
+-- Challenge mode map cache: built once on RW_CreateFrame, covers current M+ season.
+-- Keys are challenge mode map IDs (different from zone IDs above).
+local RW_CHALLENGE_MAP_NAMES = {}
+
 -- rw holds all mutable state for the results window.
 local rw = {
     frame       = nil,
@@ -334,19 +354,27 @@ local function RW_SourceDisplay(src)
     if not src or src == ""  then return "All Sources"  end
     if src == "__raids__"    then return "All Raids"    end
     if src == "__dungeons__" then return "All Dungeons" end
-    -- Raidbots uses numeric IDs in profileset names — try multiple WoW APIs
     local numId = tonumber(src)
     if numId then
-        -- Encounter Journal (raid instances and dungeon instances)
+        -- 1. Encounter Journal instance name (raids + dungeons by EJ ID)
         if EJ_GetInstanceInfo then
             local name = EJ_GetInstanceInfo(numId)
             if name and name ~= "" then return name end
         end
-        -- Challenge Mode map info (M+ dungeon IDs)
-        if C_ChallengeMode and C_ChallengeMode.GetMapInfo then
-            local info = C_ChallengeMode.GetMapInfo(numId)
+        -- 2. Challenge mode map cache (built at startup from current M+ season)
+        if RW_CHALLENGE_MAP_NAMES[numId] then return RW_CHALLENGE_MAP_NAMES[numId] end
+        -- 3. WoW area/zone info (same ID system as Wowhead zone= URLs)
+        if C_Map and C_Map.GetAreaInfo then
+            local name = C_Map.GetAreaInfo(numId)
+            if name and name ~= "" then return name end
+        end
+        -- 4. WoW UI map info (broader map record system)
+        if C_Map and C_Map.GetMapInfo then
+            local info = C_Map.GetMapInfo(numId)
             if info and info.name and info.name ~= "" then return info.name end
         end
+        -- 5. Static fallback table (Midnight S1 zone IDs)
+        if RW_ZONE_NAMES[numId] then return RW_ZONE_NAMES[numId] end
     end
     return src
 end
@@ -840,6 +868,17 @@ function RW_CreateFrame()
 
     f:Hide()
     rw.frame = f
+
+    -- Build challenge mode map name cache (covers current M+ season's dungeon IDs).
+    -- C_ChallengeMode.GetMapTable returns all valid challenge map IDs for this season.
+    if C_ChallengeMode and C_ChallengeMode.GetMapTable and C_ChallengeMode.GetMapInfo then
+        for _, mapID in ipairs(C_ChallengeMode.GetMapTable()) do
+            local info = C_ChallengeMode.GetMapInfo(mapID)
+            if info and info.name and info.name ~= "" then
+                RW_CHALLENGE_MAP_NAMES[mapID] = info.name
+            end
+        end
+    end
 
     -- Debounced refresh when item data loads (icons for uncached Droptimizer items).
     -- Registered here so the closure correctly captures the local `rw`.
