@@ -226,10 +226,11 @@ end)
 -- ---------------------------------------------------------------------------
 
 local RW_W      = 370    -- frame width
-local RW_H      = 450    -- frame height
+local RW_H      = 470    -- frame height (extra row for source filter)
 local RW_ROW_H  = 22     -- row height (px)
-local RW_NAME_W = 165    -- item name column width
-local RW_BAR_W  = 105    -- DPS bar max width
+local RW_ICON_W = 20     -- item icon size
+local RW_BAR_X  = 28     -- bar start X (icon + gap)
+local RW_BAR_W  = 234    -- DPS bar max width
 local RW_DPS_W  = 62     -- DPS value column width
 
 local RW_TRACK_LABELS = { champion = "Champion", heroic = "Heroic", mythic = "Mythic" }
@@ -237,17 +238,20 @@ local RW_TRACK_ORDER  = { "champion", "heroic", "mythic" }
 
 -- rw holds all mutable state for the results window.
 local rw = {
-    frame      = nil,
-    content    = nil,
-    rows       = {},   -- pool of reusable row sub-frames
-    specLabel  = nil,
-    trackLabel = nil,
-    footer     = nil,
-    charKey    = nil,
-    specList   = {},
-    specIdx    = 1,
-    trackList  = {},
-    trackIdx   = 1,
+    frame       = nil,
+    content     = nil,
+    rows        = {},   -- pool of reusable row sub-frames
+    specLabel   = nil,
+    trackLabel  = nil,
+    sourceLabel = nil,
+    footer      = nil,
+    charKey     = nil,
+    specList    = {},
+    specIdx     = 1,
+    trackList   = {},
+    trackIdx    = 1,
+    sourceList  = {},
+    sourceIdx   = 1,
 }
 
 -- ── Data helpers ──────────────────────────────────────────────────────────────
@@ -295,31 +299,76 @@ local function RW_GetTracks(charKey, spec)
     return tracks
 end
 
-local function RW_BuildList(charKey, spec, track)
+local function RW_GetSources(charKey)
+    if not SimdragosaDB then return {""} end
+    local charData = SimdragosaDB[charKey]
+    if not charData then return {""} end
+    local raids, dungeons = {}, {}
+    local seenRaids, seenDungeons = {}, {}
+    for _, entry in pairs(charData) do
+        local src   = entry.source     or ""
+        local stype = entry.sourceType or ""
+        if src ~= "" then
+            if stype == "raid" and not seenRaids[src] then
+                seenRaids[src] = true; raids[#raids + 1] = src
+            elseif stype == "dungeon" and not seenDungeons[src] then
+                seenDungeons[src] = true; dungeons[#dungeons + 1] = src
+            end
+        end
+    end
+    table.sort(raids)
+    table.sort(dungeons)
+    local list = {""}  -- "" = All Sources
+    if #raids > 0 then
+        list[#list + 1] = "__raids__"
+        for _, r in ipairs(raids) do list[#list + 1] = r end
+    end
+    if #dungeons > 0 then
+        list[#list + 1] = "__dungeons__"
+        for _, d in ipairs(dungeons) do list[#list + 1] = d end
+    end
+    return list
+end
+
+local function RW_SourceDisplay(src)
+    if not src or src == ""  then return "All Sources"  end
+    if src == "__raids__"    then return "All Raids"    end
+    if src == "__dungeons__" then return "All Dungeons" end
+    return src
+end
+
+local function RW_BuildList(charKey, spec, track, source)
     if not SimdragosaDB or not track then return {} end
     local charData = GetCharData(charKey)
     if not charData then return {} end
     local list = {}
+    local srcFilter     = (source and source ~= "" and source ~= "__raids__" and source ~= "__dungeons__") and source or nil
+    local srcTypeFilter = (source == "__raids__" and "raid") or (source == "__dungeons__" and "dungeon") or nil
     for itemID, entry in pairs(charData) do
-        local bestDPS = nil
-        if entry.specs then
-            for _, sd in ipairs(entry.specs) do
-                local sdSpec = sd.spec and sd.spec:lower() or ""
-                if (spec == nil or sdSpec == spec) and sd[track] and sd[track] > 0 then
-                    if bestDPS == nil or sd[track] > bestDPS then
-                        bestDPS = sd[track]
+        local srcOK = true
+        if srcFilter     and (entry.source     or "") ~= srcFilter     then srcOK = false end
+        if srcTypeFilter and (entry.sourceType or "") ~= srcTypeFilter then srcOK = false end
+        if srcOK then
+            local bestDPS = nil
+            if entry.specs then
+                for _, sd in ipairs(entry.specs) do
+                    local sdSpec = sd.spec and sd.spec:lower() or ""
+                    if (spec == nil or sdSpec == spec) and sd[track] and sd[track] > 0 then
+                        if bestDPS == nil or sd[track] > bestDPS then
+                            bestDPS = sd[track]
+                        end
                     end
                 end
             end
-        end
-        if bestDPS then
-            list[#list + 1] = {
-                itemID  = tonumber(itemID),
-                name    = entry.name or ("Item #" .. tostring(itemID)),
-                dps     = bestDPS,
-                ilvl    = entry.ilvl,
-                updated = entry.updated,
-            }
+            if bestDPS then
+                list[#list + 1] = {
+                    itemID  = tonumber(itemID),
+                    name    = entry.name or ("Item #" .. tostring(itemID)),
+                    dps     = bestDPS,
+                    ilvl    = entry.ilvl,
+                    updated = entry.updated,
+                }
+            end
         end
     end
     table.sort(list, function(a, b) return a.dps > b.dps end)
@@ -346,17 +395,16 @@ local function RW_GetOrCreateRow(idx)
     bg:SetAllPoints()
     row.bg = bg
 
-    -- Item name
-    local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    nameText:SetPoint("LEFT", row, "LEFT", 4, 0)
-    nameText:SetWidth(RW_NAME_W)
-    nameText:SetJustifyH("LEFT")
-    nameText:SetWordWrap(false)
-    row.nameText = nameText
+    -- Item icon (hover shows full tooltip)
+    local iconTex = row:CreateTexture(nil, "ARTWORK")
+    iconTex:SetPoint("LEFT", row, "LEFT", 4, 0)
+    iconTex:SetSize(RW_ICON_W, RW_ICON_W)
+    iconTex:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+    row.iconTex = iconTex
 
     -- DPS bar background
     local barBg = row:CreateTexture(nil, "ARTWORK")
-    barBg:SetPoint("LEFT", row, "LEFT", RW_NAME_W + 8, -5)
+    barBg:SetPoint("LEFT", row, "LEFT", RW_BAR_X, -5)
     barBg:SetSize(RW_BAR_W, 9)
     barBg:SetColorTexture(0.12, 0.12, 0.12, 1)
     row.barBg = barBg
@@ -416,14 +464,16 @@ end
 local function RW_Refresh()
     if not rw.frame or not rw.frame:IsShown() then return end
 
-    local spec  = rw.specList[rw.specIdx]
-    local track = rw.trackList[rw.trackIdx]
+    local spec   = rw.specList[rw.specIdx]
+    local track  = rw.trackList[rw.trackIdx]
+    local source = rw.sourceList[rw.sourceIdx]
 
     -- Cycle button labels
-    local specDisplay  = spec  and (spec:sub(1,1):upper()  .. spec:sub(2))  or "All Specs"
-    local trackDisplay = track and (RW_TRACK_LABELS[track] or track) or "—"
+    local specDisplay   = spec  and (spec:sub(1,1):upper()  .. spec:sub(2))  or "All Specs"
+    local trackDisplay  = track and (RW_TRACK_LABELS[track] or track) or "—"
     rw.specLabel:SetText(specDisplay)
     rw.trackLabel:SetText(trackDisplay)
+    rw.sourceLabel:SetText(RW_SourceDisplay(source))
 
     if not track then
         for _, row in ipairs(rw.rows) do row:Hide() end
@@ -432,7 +482,7 @@ local function RW_Refresh()
         return
     end
 
-    local list   = RW_BuildList(rw.charKey, spec, track)
+    local list   = RW_BuildList(rw.charKey, spec, track, source)
     local maxDPS = (list[1] and list[1].dps) or 1
     local count  = math.min(#list, 40)
 
@@ -454,9 +504,9 @@ local function RW_Refresh()
 
         row:SetPoint("TOP", rw.content, "TOP", 0, -(i - 1) * RW_ROW_H)
 
-        -- Name (strip quotes that can appear in Lua names)
-        local displayName = item.name:gsub('"', '')
-        row.nameText:SetText(displayName)
+        -- Icon
+        local iconPath = GetItemIcon and GetItemIcon(item.itemID)
+        row.iconTex:SetTexture(iconPath or "Interface\\Icons\\INV_Misc_QuestionMark")
 
         -- Bar
         local pct   = math.max(0.02, item.dps / maxDPS)
@@ -508,14 +558,22 @@ local function RW_CycleTrack(dir)
     RW_Refresh()
 end
 
+local function RW_CycleSource(dir)
+    if #rw.sourceList == 0 then return end
+    rw.sourceIdx = (rw.sourceIdx - 1 + dir + #rw.sourceList) % #rw.sourceList + 1
+    RW_Refresh()
+end
+
 -- ── Open / toggle ─────────────────────────────────────────────────────────────
 
 local function RW_Open()
-    rw.charKey   = GetCharKey()
-    rw.specList  = RW_GetSpecs(rw.charKey)
-    rw.specIdx   = 1
-    rw.trackList = RW_GetTracks(rw.charKey, rw.specList[1])
-    rw.trackIdx  = 1
+    rw.charKey    = GetCharKey()
+    rw.specList   = RW_GetSpecs(rw.charKey)
+    rw.specIdx    = 1
+    rw.trackList  = RW_GetTracks(rw.charKey, rw.specList[1])
+    rw.trackIdx   = 1
+    rw.sourceList = RW_GetSources(rw.charKey)
+    rw.sourceIdx  = 1
     rw.frame:Show()
     RW_Refresh()
 end
@@ -600,29 +658,30 @@ function RW_CreateFrame()
         return valLbl
     end
 
-    rw.specLabel  = MakeCycleRow(-36, "Spec:",  RW_CycleSpec)
-    rw.trackLabel = MakeCycleRow(-56, "Track:", RW_CycleTrack)
+    rw.specLabel   = MakeCycleRow(-36, "Spec:",   RW_CycleSpec)
+    rw.trackLabel  = MakeCycleRow(-56, "Track:",  RW_CycleTrack)
+    rw.sourceLabel = MakeCycleRow(-76, "Source:", RW_CycleSource)
 
     -- Separator 2 (below controls)
     local sep2 = f:CreateTexture(nil, "ARTWORK")
-    sep2:SetPoint("TOPLEFT",  f, "TOPLEFT",  12, -76)
-    sep2:SetPoint("TOPRIGHT", f, "TOPRIGHT", -12, -76)
+    sep2:SetPoint("TOPLEFT",  f, "TOPLEFT",  12, -96)
+    sep2:SetPoint("TOPRIGHT", f, "TOPRIGHT", -12, -96)
     sep2:SetHeight(1)
     sep2:SetColorTexture(0.38, 0.32, 0.65, 0.4)
 
     -- Column headers
     local hdrName = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    hdrName:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -82)
+    hdrName:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -102)
     hdrName:SetText(C.low .. "UPGRADE" .. C.reset)
 
     local hdrDPS = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    hdrDPS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -8, -82)
+    hdrDPS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -8, -102)
     hdrDPS:SetText(C.low .. "DPS GAIN" .. C.reset)
 
     -- ── Scroll frame ─────────────────────────────────────────────────────────
     local scrollFrame = CreateFrame("ScrollFrame", "SimdragosaResultsScroll", f)
-    scrollFrame:SetPoint("TOPLEFT",     f, "TOPLEFT",     12,  -98)
-    scrollFrame:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -28,  30)
+    scrollFrame:SetPoint("TOPLEFT",     f, "TOPLEFT",     12,  -118)
+    scrollFrame:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -28,   30)
 
     local content = CreateFrame("Frame", nil, scrollFrame)
     content:SetWidth(RW_W - 40)
@@ -632,7 +691,7 @@ function RW_CreateFrame()
 
     -- Scroll bar
     local sb = CreateFrame("Slider", nil, f, "UIPanelScrollBarTemplate")
-    sb:SetPoint("TOPRIGHT",    f, "TOPRIGHT",    -8, -104)
+    sb:SetPoint("TOPRIGHT",    f, "TOPRIGHT",    -8, -124)
     sb:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -8,   34)
     sb:SetMinMaxValues(0, 1)
     sb:SetValueStep(RW_ROW_H)
