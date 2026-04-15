@@ -13,6 +13,18 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify TOC version matches tag
+        run: |
+          TOC_VERSION=$(grep -E "^## Version:" *.toc | head -1 | sed 's/.*Version: *//')
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          echo "TOC version : $TOC_VERSION"
+          echo "Tag version : $TAG_VERSION"
+          if [ "$TOC_VERSION" != "$TAG_VERSION" ]; then
+            echo "ERROR: TOC version ($TOC_VERSION) does not match tag ($TAG_VERSION)"
+            echo "Bump ## Version: in the .toc file to match the tag before releasing."
+            exit 1
+          fi
+
       - name: Package and upload to CurseForge
         run: curl -s https://raw.githubusercontent.com/BigWigsMods/packager/master/release.sh | bash
         env:
