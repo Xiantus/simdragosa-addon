@@ -19,7 +19,7 @@
    git checkout develop
    git merge feature/my-feature
    ```
-4. To release, bump `## Version:` in `Simdragosa.toc`, merge `develop` into `master`, then push:
+4. To release, bump `## Version:` in `Simdragosa.toc`, merge `develop` into `master`, push, then tag:
    ```
    # On develop — bump TOC version first
    # Edit Simdragosa.toc: ## Version: X.Y.Z
@@ -28,6 +28,11 @@
    git checkout master
    git merge develop
    git push
+   # Tag AFTER pushing — must use git push for the tag, not gh release create
+   # (gh release create uses the API and does not fire a push event → workflow never runs)
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   gh release create vX.Y.Z --title "vX.Y.Z" --notes "..."
    ```
 
 ## Versioning rules
