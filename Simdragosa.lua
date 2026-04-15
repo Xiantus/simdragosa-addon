@@ -417,7 +417,7 @@ local function RW_GetOrCreateRow(idx)
 
     -- DPS bar fill (OVERLAY so it always draws on top of the background)
     local barFill = row:CreateTexture(nil, "OVERLAY")
-    barFill:SetPoint("LEFT", row, "LEFT", RW_NAME_W + 8, -5)
+    barFill:SetPoint("LEFT", row, "LEFT", RW_BAR_X, -5)
     barFill:SetHeight(9)
     barFill:SetWidth(1)
     row.barFill = barFill
