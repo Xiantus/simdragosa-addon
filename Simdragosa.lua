@@ -301,27 +301,25 @@ end
 
 local function RW_GetSources(charKey)
     if not SimdragosaDB then return {""} end
-    local charData = SimdragosaDB[charKey]
+    local charData = GetCharData(charKey)
     if not charData then return {""} end
-    local raids, dungeons = {}, {}
-    local seenRaids, seenDungeons = {}, {}
+    local hasRaids = false
+    local dungeons, seenDungeons = {}, {}
     for _, entry in pairs(charData) do
         local src   = entry.source     or ""
         local stype = entry.sourceType or ""
-        if src ~= "" then
-            if stype == "raid" and not seenRaids[src] then
-                seenRaids[src] = true; raids[#raids + 1] = src
-            elseif stype == "dungeon" and not seenDungeons[src] then
-                seenDungeons[src] = true; dungeons[#dungeons + 1] = src
-            end
+        -- Raids: only track presence — Raidbots puts boss encounter IDs in
+        -- source for raid items, which we don't want as individual filter tabs.
+        if stype == "raid" then
+            hasRaids = true
+        elseif stype == "dungeon" and src ~= "" and not seenDungeons[src] then
+            seenDungeons[src] = true; dungeons[#dungeons + 1] = src
         end
     end
-    table.sort(raids)
     table.sort(dungeons)
     local list = {""}  -- "" = All Sources
-    if #raids > 0 then
+    if hasRaids then
         list[#list + 1] = "__raids__"
-        for _, r in ipairs(raids) do list[#list + 1] = r end
     end
     if #dungeons > 0 then
         list[#list + 1] = "__dungeons__"
