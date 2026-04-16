@@ -420,46 +420,49 @@ end
 
 -- ── Scaled tooltip helpers ────────────────────────────────────────────────────
 
--- Midnight S1: item level → bonus ID for correctly-scaled tooltip links.
--- Single bonus ID per ilvl (12785-12806 series confirmed via Wowhead brute-force).
--- UPDATE THIS TABLE EACH SEASON with new bonus IDs.
--- ilvl 243 bonus ID unknown — gap in Veteran 4/6.
-local ILVL_BONUS_IDS = {
-    -- Veteran track (world quests / lower content)
-    [233] = {13341},  -- Veteran 1/6
-    [237] = {13342},  -- Veteran 2/6
-    [240] = {13343},  -- Veteran 3/6
-    -- [243] = ???,   -- Veteran 4/6 — bonus ID not found
-    [246] = {12785},  -- Veteran 5/6 / Champion 1/6
-    [250] = {12786},  -- Veteran 6/6 / Champion 2/6
-    -- Champion track (M+ end-of-dungeon)
-    [253] = {12787},  -- Champion 3/6
-    [256] = {12788},  -- Champion 4/6
-    [259] = {12789},  -- Champion 5/6 / Hero 1/6
-    [263] = {12790},  -- Champion 6/6 / Hero 2/6
-    -- Hero track (M+ vault)
-    [266] = {12791},  -- Hero 3/6
-    [269] = {12792},  -- Hero 4/6
-    [272] = {12797},  -- Hero 5/6 / Myth 1/6
-    [276] = {12798},  -- Hero 6/6 / Myth 2/6
-    -- Myth track (raid)
-    [279] = {12799},  -- Myth 3/6
-    [282] = {12800},  -- Myth 4/6
-    [285] = {12805},  -- Myth 5/6
-    [289] = {12806},  -- Myth 6/6
+-- ilvl delta → bonus ID (adds N levels to base item ilvl in the client).
+-- Sourced from KeystoneLoot addon (Wolkenschutz/KeystoneLoot on GitHub).
+-- These are universal client DB2 bonus IDs — work for any item.
+local ILVL_DELTA_BONUS = {
+    [-100]=1372,[-99]=1373,[-98]=1374,[-97]=1375,[-96]=1376,[-95]=1377,[-94]=1378,[-93]=1379,[-92]=1380,[-91]=1381,[-90]=1382,[-89]=1383,[-88]=1384,[-87]=1385,[-86]=1386,[-85]=1387,[-84]=1388,[-83]=1389,[-82]=1390,[-81]=1391,[-80]=1392,[-79]=1393,[-78]=1394,[-77]=1395,[-76]=1396,[-75]=1397,[-74]=1398,[-73]=1399,[-72]=1400,[-71]=1401,[-70]=1402,[-69]=1403,[-68]=1404,[-67]=1405,[-66]=1406,[-65]=1407,[-64]=1408,[-63]=1409,[-62]=1410,[-61]=1411,[-60]=1412,[-59]=1413,[-58]=1414,[-57]=1415,[-56]=1416,[-55]=1417,[-54]=1418,[-53]=1419,[-52]=1420,[-51]=1421,[-50]=1422,[-49]=1423,[-48]=1424,[-47]=1425,[-46]=1426,[-45]=1427,[-44]=1428,[-43]=1429,[-42]=1430,[-41]=1431,[-40]=1432,[-39]=1433,[-38]=1434,[-37]=1435,[-36]=1436,[-35]=1437,[-34]=1438,[-33]=1439,[-32]=1440,[-31]=1441,[-30]=1442,[-29]=1443,[-28]=1444,[-27]=1445,[-26]=1446,[-25]=1447,[-24]=1448,[-23]=1449,[-22]=1450,[-21]=1451,[-20]=1452,[-19]=1453,[-18]=1454,[-17]=1455,[-16]=1456,[-15]=1457,[-14]=1458,[-13]=1459,[-12]=1460,[-11]=1461,[-10]=1462,[-9]=1463,[-8]=1464,[-7]=1465,[-6]=1466,[-5]=1467,[-4]=1468,[-3]=1469,[-2]=1470,[-1]=1471,
+    [1]=1473,[2]=1474,[3]=1475,[4]=1476,[5]=1477,[6]=1478,[7]=1479,[8]=1480,[9]=1481,[10]=1482,[11]=1483,[12]=1484,[13]=1485,[14]=1486,[15]=1487,[16]=1488,[17]=1489,[18]=1490,[19]=1491,[20]=1492,[21]=1493,[22]=1494,[23]=1495,[24]=1496,[25]=1497,[26]=1498,[27]=1499,[28]=1500,[29]=1501,[30]=1502,[31]=1503,[32]=1504,[33]=1505,[34]=1506,[35]=1507,[36]=1508,[37]=1509,[38]=1510,[39]=1511,[40]=1512,[41]=1513,[42]=1514,[43]=1515,[44]=1516,[45]=1517,[46]=1518,[47]=1519,[48]=1520,[49]=1521,[50]=1522,[51]=1523,[52]=1524,[53]=1525,[54]=1526,[55]=1527,[56]=1528,[57]=1529,[58]=1530,[59]=1531,[60]=1532,[61]=1533,[62]=1534,[63]=1535,[64]=1536,[65]=1537,[66]=1538,[67]=1539,[68]=1540,[69]=1541,[70]=1542,[71]=1543,[72]=1544,[73]=1545,[74]=1546,[75]=1547,[76]=1548,[77]=1549,[78]=1550,[79]=1551,[80]=1552,[81]=1553,[82]=1554,[83]=1555,[84]=1556,[85]=1557,[86]=1558,[87]=1559,[88]=1560,[89]=1561,[90]=1562,[91]=1563,[92]=1564,[93]=1565,[94]=1566,[95]=1567,[96]=1568,[97]=1569,[98]=1570,[99]=1571,[100]=1572,
+    [101]=1573,[102]=1574,[103]=1575,[104]=1576,[105]=1577,[106]=1578,[107]=1579,[108]=1580,[109]=1581,[110]=1582,[111]=1583,[112]=1584,[113]=1585,[114]=1586,[115]=1587,[116]=1588,[117]=1589,[118]=1590,[119]=1591,[120]=1592,[121]=1593,[122]=1594,[123]=1595,[124]=1596,[125]=1597,[126]=1598,[127]=1599,[128]=1600,[129]=1601,[130]=1602,[131]=1603,[132]=1604,[133]=1605,[134]=1606,[135]=1607,[136]=1608,[137]=1609,[138]=1610,[139]=1611,[140]=1612,[141]=1613,[142]=1614,[143]=1615,[144]=1616,[145]=1617,[146]=1618,[147]=1619,[148]=1620,[149]=1621,[150]=1622,[151]=1623,[152]=1624,[153]=1625,[154]=1626,[155]=1627,[156]=1628,[157]=1629,[158]=1630,[159]=1631,[160]=1632,[161]=1633,[162]=1634,[163]=1635,[164]=1636,[165]=1637,[166]=1638,[167]=1639,[168]=1640,[169]=1641,[170]=1642,[171]=1643,[172]=1644,[173]=1645,[174]=1646,[175]=1647,[176]=1648,[177]=1649,[178]=1650,[179]=1651,[180]=1652,[181]=1653,[182]=1654,[183]=1655,[184]=1656,[185]=1657,[186]=1658,[187]=1659,[188]=1660,[189]=1661,[190]=1662,[191]=1663,[192]=1664,[193]=1665,[194]=1666,[195]=1667,[196]=1668,[197]=1669,[198]=1670,[199]=1671,[200]=1672,
+    [201]=3130,[202]=3131,[203]=3132,[204]=3133,[205]=3134,[206]=3135,[207]=3136,[208]=3137,[209]=3138,[210]=3139,[211]=3140,[212]=3141,[213]=3142,[214]=3143,[215]=3144,[216]=3145,[217]=3146,[218]=3147,[219]=3148,[220]=3149,[221]=3150,[222]=3151,[223]=3152,[224]=3153,[225]=3154,[226]=3155,[227]=3156,[228]=3157,[229]=3158,[230]=3159,[231]=3160,[232]=3161,[233]=3162,[234]=3163,[235]=3164,[236]=3165,[237]=3166,[238]=3167,[239]=3168,[240]=3169,[241]=3170,[242]=3171,[243]=3172,[244]=3173,[245]=3174,[246]=3175,[247]=3176,[248]=3177,[249]=3178,[250]=3179,[251]=3180,[252]=3181,[253]=3182,[254]=3183,[255]=3184,[256]=3185,[257]=3186,[258]=3187,[259]=3188,[260]=3189,[261]=3190,[262]=3191,[263]=3192,[264]=3193,[265]=3194,[266]=3195,[267]=3196,[268]=3197,[269]=3198,[270]=3199,[271]=3200,[272]=3201,[273]=3202,[274]=3203,[275]=3204,[276]=3205,[277]=3206,[278]=3207,[279]=3208,[280]=3209,[281]=3210,[282]=3211,[283]=3212,[284]=3213,[285]=3214,[286]=3215,[287]=3216,[288]=3217,[289]=3218,[290]=3219,[291]=3220,[292]=3221,[293]=3222,[294]=3223,[295]=3224,[296]=3225,[297]=3226,[298]=3227,[299]=3228,[300]=3229,
 }
 
--- Build an item hyperlink at a specific ilvl using season bonus IDs.
--- Returns nil if the ilvl isn't in the table (caller falls back to SetItemByID).
-local function BuildScaledItemLink(itemID, itemName, ilvl)
-    local bonuses = ILVL_BONUS_IDS[ilvl]
-    if not bonuses then return nil end
-    -- Retail item link format:
-    -- |Hitem:id:enchant:gem1:gem2:gem3:gem4:suffix:uid:level:spec:upgradeType:instanceDiff:numBonusIDs:b1:...|h[Name]|h
-    -- 12 zero fields between itemID and numBonusIDs.
-    local name = (itemName or ("Item #" .. itemID)):gsub("|", "")
-    return string.format("|Hitem:%d:0:0:0:0:0:0:0:0:0:0:0:0:%d:%s|h[%s]|h",
-        itemID, #bonuses, table.concat(bonuses, ":"), name)
+-- Midnight S1: simmed ilvl → upgrade track bonus ID (shows "Upgrade Level: X" in tooltip).
+-- UPDATE THIS TABLE EACH SEASON.
+local TRACK_BONUS_IDS = {
+    [233]=12777,[237]=12778,[240]=12779,[243]=12780,  -- LFR 1-4/6
+    [246]=12785,[250]=12786,[253]=12787,[256]=12788,[259]=12789,[263]=12790,  -- Normal/Champion
+    [266]=12795,[269]=12796,[272]=12797,[276]=12798,  -- Heroic/Hero
+    [279]=12803,[282]=12804,[285]=12805,[289]=12806,  -- Mythic/Myth
+}
+
+-- Build a scaled item link using delta-based bonus IDs (same technique as KeystoneLoot).
+-- Returns nil if base ilvl unavailable (item not cached yet); caller falls back to SetItemByID.
+local function BuildScaledItemLink(itemID, ilvl)
+    local _, _, baseIlvl = C_Item.GetDetailedItemLevelInfo(itemID)
+    if not baseIlvl or baseIlvl == 0 then return nil end
+
+    local delta = ilvl - baseIlvl
+    local deltaBonus = ILVL_DELTA_BONUS[delta]
+    if not deltaBonus then return nil end
+
+    local trackBonus = TRACK_BONUS_IDS[ilvl]
+    local playerLevel = UnitLevel("player") or 80
+    local specId = 0
+    local curSlot = GetSpecialization()
+    if curSlot then specId = select(1, GetSpecializationInfo(curSlot)) or 0 end
+
+    -- Collect bonus IDs: delta scaler + track tier + epic quality (1674)
+    local bonusIds = { deltaBonus }
+    if trackBonus then bonusIds[#bonusIds+1] = trackBonus end
+    bonusIds[#bonusIds+1] = 1674
+
+    -- Format: item:ID::::::::playerLevel:specId:::numBonusIds:b1:b2:...
+    return string.format("item:%d::::::::%d:%d:::%d:%s",
+        itemID, playerLevel, specId, #bonusIds, table.concat(bonusIds, ":"))
 end
 
 -- ── Row helpers ───────────────────────────────────────────────────────────────
@@ -514,16 +517,20 @@ local function RW_GetOrCreateRow(idx)
     row:SetScript("OnEnter", function(self)
         if self.itemID then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            -- Try to show stats at the simmed ilvl via a bonus-ID item link.
-            -- Falls back to SetItemByID (base stats) if ilvl not in the S1 table.
-            GameTooltip:SetItemByID(self.itemID)
-            if self.simIlvl then
-                GameTooltip:AddLine(" ")
-                GameTooltip:AddDoubleLine(
-                    C.label .. "Simdragosa" .. C.reset,
-                    "|cffffd100Simmed at ilvl " .. self.simIlvl .. "|r",
-                    1, 1, 1, 1, 1, 1
-                )
+            local scaledLink = self.simIlvl and BuildScaledItemLink(self.itemID, self.simIlvl)
+            if scaledLink then
+                GameTooltip:SetHyperlink(scaledLink)
+            else
+                -- Fallback: base stats + footer note (item not cached or ilvl out of table)
+                GameTooltip:SetItemByID(self.itemID)
+                if self.simIlvl then
+                    GameTooltip:AddLine(" ")
+                    GameTooltip:AddDoubleLine(
+                        C.label .. "Simdragosa" .. C.reset,
+                        "|cffffd100Simmed at ilvl " .. self.simIlvl .. "|r",
+                        1, 1, 1, 1, 1, 1
+                    )
+                end
             end
             GameTooltip:Show()
         end
