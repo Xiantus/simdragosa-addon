@@ -804,7 +804,7 @@ function RW_CreateFrame()
         edgeSize = 8,
         insets   = {left=2, right=2, top=2, bottom=2},
     })
-    srcPopup:SetBackdropColor(0.06, 0.04, 0.14, 0.90)
+    srcPopup:SetBackdropColor(0.06, 0.04, 0.14, 1.0)
     srcPopup:SetBackdropBorderColor(0.38, 0.32, 0.65, 0.8)
     srcPopup:Hide()
     rw.sourcePopup = srcPopup
