@@ -409,6 +409,7 @@ local function RW_BuildList(charKey, spec, track, source)
                     dps     = bestDPS,
                     ilvl    = entry.ilvl,
                     updated = entry.updated,
+                    icon    = entry.icon,
                 }
             end
         end
@@ -546,11 +547,16 @@ local function RW_Refresh()
 
         row:SetPoint("TOP", rw.content, "TOP", 0, -(i - 1) * RW_ROW_H)
 
-        -- Icon: GetItemInfoInstant for cached items; GetItemInfo queues a server
-        -- request for uncached items and fires GET_ITEM_INFO_RECEIVED when done.
-        local iconPath = select(10, GetItemInfoInstant(item.itemID))
-        if not iconPath then
-            GetItemInfo(item.itemID)  -- queue load; RW_Refresh called on event
+        -- Icon: use preloaded Wowhead icon name from SimdragosaDB if available,
+        -- else fall back to GetItemInfoInstant (WoW client cache).
+        local iconPath
+        if item.icon and item.icon ~= "" then
+            iconPath = "Interface\\Icons\\" .. item.icon
+        else
+            iconPath = select(10, GetItemInfoInstant(item.itemID))
+            if not iconPath then
+                GetItemInfo(item.itemID)  -- queue load; RW_Refresh called on event
+            end
         end
         row.iconTex:SetTexture(iconPath or "Interface\\Icons\\INV_Misc_QuestionMark")
 
