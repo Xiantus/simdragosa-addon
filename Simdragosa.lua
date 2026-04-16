@@ -470,14 +470,22 @@ local function RW_GetOrCreateRow(idx)
     row:SetScript("OnEnter", function(self)
         if self.itemID then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetItemByID(self.itemID)
-            if self.simIlvl then
-                GameTooltip:AddLine(" ")
-                GameTooltip:AddDoubleLine(
-                    C.label .. "Simdragosa" .. C.reset,
-                    "|cffffd100Simmed at " .. self.simIlvl .. "|r",
-                    1, 1, 1, 1, 1, 1
-                )
+            -- Try to show stats at the simmed ilvl via a bonus-ID item link.
+            -- Falls back to SetItemByID (base stats) if ilvl not in the S1 table.
+            local scaledLink = self.simIlvl and
+                BuildScaledItemLink(self.itemID, self.itemName, self.simIlvl)
+            if scaledLink then
+                GameTooltip:SetHyperlink(scaledLink)
+            else
+                GameTooltip:SetItemByID(self.itemID)
+                if self.simIlvl then
+                    GameTooltip:AddLine(" ")
+                    GameTooltip:AddDoubleLine(
+                        C.label .. "Simdragosa" .. C.reset,
+                        "|cffffd100Simmed at " .. self.simIlvl .. "|r",
+                        1, 1, 1, 1, 1, 1
+                    )
+                end
             end
             GameTooltip:Show()
         end
@@ -534,9 +542,10 @@ local function RW_Refresh()
     for i = 1, count do
         local item = list[i]
         local row  = RW_GetOrCreateRow(i)
-        row.itemID  = item.itemID
-        row.simIlvl = item.ilvl
-        row.oddRow  = (i % 2 == 1)
+        row.itemID   = item.itemID
+        row.itemName = item.name
+        row.simIlvl  = item.ilvl
+        row.oddRow   = (i % 2 == 1)
 
         -- Background alternating tint
         if row.oddRow then
@@ -668,6 +677,38 @@ local function RW_OpenSourceDropdown()
 
     popup:SetHeight(yOff + PAD)
     popup:Show()
+end
+
+-- Midnight S1: item level → bonus ID(s) for correctly-scaled tooltip links.
+-- Multiple bonus IDs in a table entry are applied together (e.g. ilvl 256 needs
+-- both the track ID and a secondary stat modifier).
+-- UPDATE THIS TABLE EACH SEASON with new bonus IDs.
+local ILVL_BONUS_IDS = {
+    -- Veteran track (world quests / lower content)
+    [233] = {13341},
+    [237] = {13342},
+    [240] = {13343},
+    -- Champion track (M+ end-of-dungeon)
+    [250] = {13346},
+    [253] = {13347},
+    [256] = {13347, 12374},
+    [259] = {13347, 12373},
+    [263] = {13350},
+    [266] = {13351},
+    -- Hero track (M+ vault / raid tiers) — add 282/285/289/292/295+ as confirmed
+    [276] = {13354},
+    [279] = {13355},
+}
+
+-- Build an item hyperlink at a specific ilvl using season bonus IDs.
+-- Returns nil if the ilvl isn't in the table (caller falls back to SetItemByID).
+local function BuildScaledItemLink(itemID, itemName, ilvl)
+    local bonuses = ILVL_BONUS_IDS[ilvl]
+    if not bonuses then return nil end
+    -- |Hitem:ID:0:0:0:0:0:0:0:0:0:0:0:0:numBonuses:b1:b2:...|h[Name]|h
+    return string.format("|Hitem:%d:0:0:0:0:0:0:0:0:0:0:0:0:%d:%s|h[%s]|h",
+        itemID, #bonuses, table.concat(bonuses, ":"),
+        (itemName or ("Item #" .. itemID)):gsub("|", ""))
 end
 
 -- WoW spec ID → SimC spec name (must be declared before RW_Open)
