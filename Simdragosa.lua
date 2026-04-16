@@ -430,16 +430,10 @@ local ILVL_DELTA_BONUS = {
     [201]=3130,[202]=3131,[203]=3132,[204]=3133,[205]=3134,[206]=3135,[207]=3136,[208]=3137,[209]=3138,[210]=3139,[211]=3140,[212]=3141,[213]=3142,[214]=3143,[215]=3144,[216]=3145,[217]=3146,[218]=3147,[219]=3148,[220]=3149,[221]=3150,[222]=3151,[223]=3152,[224]=3153,[225]=3154,[226]=3155,[227]=3156,[228]=3157,[229]=3158,[230]=3159,[231]=3160,[232]=3161,[233]=3162,[234]=3163,[235]=3164,[236]=3165,[237]=3166,[238]=3167,[239]=3168,[240]=3169,[241]=3170,[242]=3171,[243]=3172,[244]=3173,[245]=3174,[246]=3175,[247]=3176,[248]=3177,[249]=3178,[250]=3179,[251]=3180,[252]=3181,[253]=3182,[254]=3183,[255]=3184,[256]=3185,[257]=3186,[258]=3187,[259]=3188,[260]=3189,[261]=3190,[262]=3191,[263]=3192,[264]=3193,[265]=3194,[266]=3195,[267]=3196,[268]=3197,[269]=3198,[270]=3199,[271]=3200,[272]=3201,[273]=3202,[274]=3203,[275]=3204,[276]=3205,[277]=3206,[278]=3207,[279]=3208,[280]=3209,[281]=3210,[282]=3211,[283]=3212,[284]=3213,[285]=3214,[286]=3215,[287]=3216,[288]=3217,[289]=3218,[290]=3219,[291]=3220,[292]=3221,[293]=3222,[294]=3223,[295]=3224,[296]=3225,[297]=3226,[298]=3227,[299]=3228,[300]=3229,
 }
 
--- Midnight S1: simmed ilvl → upgrade track bonus ID (shows "Upgrade Level: X" in tooltip).
--- UPDATE THIS TABLE EACH SEASON.
-local TRACK_BONUS_IDS = {
-    [233]=12777,[237]=12778,[240]=12779,[243]=12780,  -- LFR 1-4/6
-    [246]=12785,[250]=12786,[253]=12787,[256]=12788,[259]=12789,[263]=12790,  -- Normal/Champion
-    [266]=12795,[269]=12796,[272]=12797,[276]=12798,  -- Heroic/Hero
-    [279]=12803,[282]=12804,[285]=12805,[289]=12806,  -- Mythic/Myth
-}
-
 -- Build a scaled item link using delta-based bonus IDs (same technique as KeystoneLoot).
+-- Omits track-tier bonus IDs deliberately: ilvl alone can't distinguish heroic vs mythic
+-- (both share ilvls 272/276), so adding a track bonus would show wrong upgrade label.
+-- Delta bonus handles all stat scaling; 1674 sets epic quality display.
 -- Returns nil if base ilvl unavailable (item not cached yet); caller falls back to SetItemByID.
 local function BuildScaledItemLink(itemID, ilvl)
     local _, _, baseIlvl = C_Item.GetDetailedItemLevelInfo(itemID)
@@ -449,20 +443,14 @@ local function BuildScaledItemLink(itemID, ilvl)
     local deltaBonus = ILVL_DELTA_BONUS[delta]
     if not deltaBonus then return nil end
 
-    local trackBonus = TRACK_BONUS_IDS[ilvl]
     local playerLevel = UnitLevel("player") or 80
     local specId = 0
     local curSlot = GetSpecialization()
     if curSlot then specId = select(1, GetSpecializationInfo(curSlot)) or 0 end
 
-    -- Collect bonus IDs: delta scaler + track tier + epic quality (1674)
-    local bonusIds = { deltaBonus }
-    if trackBonus then bonusIds[#bonusIds+1] = trackBonus end
-    bonusIds[#bonusIds+1] = 1674
-
     -- Format: item:ID::::::::playerLevel:specId:::numBonusIds:b1:b2:...
-    return string.format("item:%d::::::::%d:%d:::%d:%s",
-        itemID, playerLevel, specId, #bonusIds, table.concat(bonusIds, ":"))
+    return string.format("item:%d::::::::%d:%d:::2:%d:1674",
+        itemID, playerLevel, specId, deltaBonus)
 end
 
 -- ── Row helpers ───────────────────────────────────────────────────────────────
