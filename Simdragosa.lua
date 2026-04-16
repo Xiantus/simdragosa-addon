@@ -418,6 +418,40 @@ local function RW_BuildList(charKey, spec, track, source)
     return list
 end
 
+-- ── Scaled tooltip helpers ────────────────────────────────────────────────────
+
+-- Midnight S1: item level → bonus ID(s) for correctly-scaled tooltip links.
+-- Multiple bonus IDs in a table entry are applied together (e.g. ilvl 256 needs
+-- both the track ID and a secondary stat modifier).
+-- UPDATE THIS TABLE EACH SEASON with new bonus IDs.
+local ILVL_BONUS_IDS = {
+    -- Veteran track (world quests / lower content)
+    [233] = {13341},
+    [237] = {13342},
+    [240] = {13343},
+    -- Champion track (M+ end-of-dungeon)
+    [250] = {13346},
+    [253] = {13347},
+    [256] = {13347, 12374},
+    [259] = {13347, 12373},
+    [263] = {13350},
+    [266] = {13351},
+    -- Hero track (M+ vault / raid tiers) — add 282/285/289/292/295+ as confirmed
+    [276] = {13354},
+    [279] = {13355},
+}
+
+-- Build an item hyperlink at a specific ilvl using season bonus IDs.
+-- Returns nil if the ilvl isn't in the table (caller falls back to SetItemByID).
+local function BuildScaledItemLink(itemID, itemName, ilvl)
+    local bonuses = ILVL_BONUS_IDS[ilvl]
+    if not bonuses then return nil end
+    -- |Hitem:ID:0:0:0:0:0:0:0:0:0:0:0:0:numBonuses:b1:b2:...|h[Name]|h
+    return string.format("|Hitem:%d:0:0:0:0:0:0:0:0:0:0:0:0:%d:%s|h[%s]|h",
+        itemID, #bonuses, table.concat(bonuses, ":"),
+        (itemName or ("Item #" .. itemID)):gsub("|", ""))
+end
+
 -- ── Row helpers ───────────────────────────────────────────────────────────────
 
 local function RW_FormatDPS(dps)
@@ -677,38 +711,6 @@ local function RW_OpenSourceDropdown()
 
     popup:SetHeight(yOff + PAD)
     popup:Show()
-end
-
--- Midnight S1: item level → bonus ID(s) for correctly-scaled tooltip links.
--- Multiple bonus IDs in a table entry are applied together (e.g. ilvl 256 needs
--- both the track ID and a secondary stat modifier).
--- UPDATE THIS TABLE EACH SEASON with new bonus IDs.
-local ILVL_BONUS_IDS = {
-    -- Veteran track (world quests / lower content)
-    [233] = {13341},
-    [237] = {13342},
-    [240] = {13343},
-    -- Champion track (M+ end-of-dungeon)
-    [250] = {13346},
-    [253] = {13347},
-    [256] = {13347, 12374},
-    [259] = {13347, 12373},
-    [263] = {13350},
-    [266] = {13351},
-    -- Hero track (M+ vault / raid tiers) — add 282/285/289/292/295+ as confirmed
-    [276] = {13354},
-    [279] = {13355},
-}
-
--- Build an item hyperlink at a specific ilvl using season bonus IDs.
--- Returns nil if the ilvl isn't in the table (caller falls back to SetItemByID).
-local function BuildScaledItemLink(itemID, itemName, ilvl)
-    local bonuses = ILVL_BONUS_IDS[ilvl]
-    if not bonuses then return nil end
-    -- |Hitem:ID:0:0:0:0:0:0:0:0:0:0:0:0:numBonuses:b1:b2:...|h[Name]|h
-    return string.format("|Hitem:%d:0:0:0:0:0:0:0:0:0:0:0:0:%d:%s|h[%s]|h",
-        itemID, #bonuses, table.concat(bonuses, ":"),
-        (itemName or ("Item #" .. itemID)):gsub("|", ""))
 end
 
 -- WoW spec ID → SimC spec name (must be declared before RW_Open)
