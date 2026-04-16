@@ -680,6 +680,23 @@ local function RW_OpenSourceDropdown()
     popup:Show()
 end
 
+-- WoW spec ID → SimC spec name (must be declared before RW_Open)
+local SIMC_SPEC_IDS = {
+    [250]="blood",        [251]="frost",         [252]="unholy",
+    [577]="havoc",        [581]="vengeance",
+    [102]="balance",      [103]="feral",         [104]="guardian",     [105]="restoration",
+    [1467]="devastation", [1468]="preservation", [1473]="augmentation",
+    [253]="beast_mastery",[254]="marksmanship",  [255]="survival",
+    [62]="arcane",        [63]="fire",            [64]="frost",
+    [268]="brewmaster",   [270]="mistweaver",    [269]="windwalker",
+    [65]="holy",          [66]="protection",     [70]="retribution",
+    [256]="discipline",   [257]="holy",          [258]="shadow",
+    [259]="assassination",[260]="outlaw",        [261]="subtlety",
+    [262]="elemental",    [263]="enhancement",   [264]="restoration",
+    [265]="affliction",   [266]="demonology",    [267]="destruction",
+    [71]="arms",          [72]="fury",           [73]="protection",
+}
+
 -- ── Open / toggle ─────────────────────────────────────────────────────────────
 
 local function RW_Open()
@@ -691,7 +708,7 @@ local function RW_Open()
     local curSpecSlot = GetSpecialization()
     if curSpecSlot then
         local curSpecId = select(1, GetSpecializationInfo(curSpecSlot))
-        local curSpecName = curSpecId and SIMC_SPEC[curSpecId]
+        local curSpecName = curSpecId and SIMC_SPEC_IDS[curSpecId]
         if curSpecName then
             for i, s in ipairs(rw.specList) do
                 if s == curSpecName then defaultSpecIdx = i; break end
@@ -962,22 +979,6 @@ local SIMC_CLASS = {
 }
 
 -- WoW spec ID → SimC spec name
-local SIMC_SPEC = {
-    [250]="blood",        [251]="frost",         [252]="unholy",
-    [577]="havoc",        [581]="vengeance",
-    [102]="balance",      [103]="feral",         [104]="guardian",     [105]="restoration",
-    [1467]="devastation", [1468]="preservation", [1473]="augmentation",
-    [253]="beast_mastery",[254]="marksmanship",  [255]="survival",
-    [62]="arcane",        [63]="fire",            [64]="frost",
-    [268]="brewmaster",   [270]="mistweaver",    [269]="windwalker",
-    [65]="holy",          [66]="protection",     [70]="retribution",
-    [256]="discipline",   [257]="holy",          [258]="shadow",
-    [259]="assassination",[260]="outlaw",        [261]="subtlety",
-    [262]="elemental",    [263]="enhancement",   [264]="restoration",
-    [265]="affliction",   [266]="demonology",    [267]="destruction",
-    [71]="arms",          [72]="fury",           [73]="protection",
-}
-
 local REGION_MAP = { [1]="us", [2]="kr", [3]="eu", [4]="tw", [5]="cn" }
 
 -- Parse a WoW item hyperlink into a SimC item field string.
@@ -1038,7 +1039,7 @@ local function BuildSimCProfile()
 
     local specIdx          = GetSpecialization() or 1
     local specId, _, _, _, role = GetSpecializationInfo(specIdx)
-    local simcSpec         = SIMC_SPEC[specId] or "unknown"
+    local simcSpec         = SIMC_SPEC_IDS[specId] or "unknown"
     local simcRole         = (role == "HEALER") and "heal" or (role == "TANK") and "tank" or "attack"
 
     local talentStr = ""
@@ -1092,7 +1093,7 @@ local function SIMC_StoreProfile(profile)
     local charKey = GetCharKey()
     local specIdx = GetSpecialization() or 1
     local specId  = GetSpecializationInfo(specIdx)
-    local spec    = SIMC_SPEC[specId] or "unknown"
+    local spec    = SIMC_SPEC_IDS[specId] or "unknown"
 
     SimdragosaConfig.exports = SimdragosaConfig.exports or {}
     SimdragosaConfig.exports[charKey] = {
@@ -1254,7 +1255,7 @@ local function DoExport()
     local bProfile = BuildSimCProfile()
     local specIdx  = GetSpecialization() or 1
     local specId   = select(1, GetSpecializationInfo(specIdx))
-    local spec     = SIMC_SPEC[specId] or "unknown"
+    local spec     = SIMC_SPEC_IDS[specId] or "unknown"
     SimdragosaConfig.exports = SimdragosaConfig.exports or {}
     SimdragosaConfig.exports[charKey] = {
         simc      = bProfile,
