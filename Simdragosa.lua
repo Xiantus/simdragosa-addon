@@ -516,22 +516,14 @@ local function RW_GetOrCreateRow(idx)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             -- Try to show stats at the simmed ilvl via a bonus-ID item link.
             -- Falls back to SetItemByID (base stats) if ilvl not in the S1 table.
-            local scaledLink = self.simIlvl and
-                BuildScaledItemLink(self.itemID, self.itemName, self.simIlvl)
-            if scaledLink then
-                GameTooltip:SetHyperlink(scaledLink)
-                GameTooltip:AddLine("|cff888888[SDR] scaled link ilvl " .. (self.simIlvl or "?") .. "|r")
-            else
-                GameTooltip:SetItemByID(self.itemID)
-                GameTooltip:AddLine("|cff888888[SDR] fallback ilvl " .. (self.simIlvl or "?") .. "|r")
-                if self.simIlvl then
-                    GameTooltip:AddLine(" ")
-                    GameTooltip:AddDoubleLine(
-                        C.label .. "Simdragosa" .. C.reset,
-                        "|cffffd100Simmed at " .. self.simIlvl .. "|r",
-                        1, 1, 1, 1, 1, 1
-                    )
-                end
+            GameTooltip:SetItemByID(self.itemID)
+            if self.simIlvl then
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddDoubleLine(
+                    C.label .. "Simdragosa" .. C.reset,
+                    "|cffffd100Simmed at ilvl " .. self.simIlvl .. "|r",
+                    1, 1, 1, 1, 1, 1
+                )
             end
             GameTooltip:Show()
         end
