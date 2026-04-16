@@ -827,7 +827,7 @@ function RW_CreateFrame()
     hdrName:SetText(C.low .. "UPGRADE" .. C.reset)
 
     local hdrDPS = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    hdrDPS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -8, -102)
+    hdrDPS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -30, -102)
     hdrDPS:SetText(C.low .. "DPS GAIN" .. C.reset)
 
     -- ── Scroll frame ─────────────────────────────────────────────────────────
