@@ -525,11 +525,18 @@ local function RW_GetOrCreateRow(idx)
         if self.itemID then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             local scaledLink = self.simIlvl and BuildScaledItemLink(self.itemID, self.simIlvl, self.simTrack)
+            -- DEBUG: show base ilvl values to diagnose scaling
+            local gi4  = select(4, GetItemInfo(self.itemID))
+            local cd3  = select(3, C_Item.GetDetailedItemLevelInfo(self.itemID))
             if scaledLink then
                 GameTooltip:SetHyperlink(scaledLink)
+                GameTooltip:AddLine(string.format("|cff888888[SDR] sim=%s track=%s gi=%s cd=%s|r",
+                    tostring(self.simIlvl), tostring(self.simTrack), tostring(gi4), tostring(cd3)))
             else
                 -- Fallback: base stats + footer note (item not cached or ilvl out of table)
                 GameTooltip:SetItemByID(self.itemID)
+                GameTooltip:AddLine(string.format("|cff888888[SDR] FALLBACK sim=%s track=%s gi=%s cd=%s|r",
+                    tostring(self.simIlvl), tostring(self.simTrack), tostring(gi4), tostring(cd3)))
                 if self.simIlvl then
                     GameTooltip:AddLine(" ")
                     GameTooltip:AddDoubleLine(
