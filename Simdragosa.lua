@@ -632,7 +632,7 @@ local function RW_OpenSourceDropdown()
     for idx, src in ipairs(rw.sourceList) do
         local isIndented = (idx > dungeonStart and src ~= "__dungeons__")
 
-        local btn = CreateFrame("Button", nil, popup)
+        local btn = CreateFrame("Button", nil, popup, "BackdropTemplate")
         btn:SetHeight(ROW_H)
         btn:SetPoint("TOPLEFT",  popup, "TOPLEFT",  0,    -yOff)
         btn:SetPoint("TOPRIGHT", popup, "TOPRIGHT", 0,    -yOff)
