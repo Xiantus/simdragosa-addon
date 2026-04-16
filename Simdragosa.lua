@@ -605,18 +605,17 @@ local function RW_Refresh()
 
         row:SetPoint("TOP", rw.content, "TOP", 0, -(i - 1) * RW_ROW_H)
 
-        -- Icon: use preloaded Wowhead icon name from SimdragosaDB if available,
-        -- else fall back to GetItemInfoInstant (WoW client cache).
-        local iconPath
-        if item.icon and item.icon ~= "" then
-            iconPath = "Interface\\Icons\\" .. item.icon
+        -- Icon: C_Item.GetItemIconByID returns the numeric file ID directly from
+        -- the client — no cache required, no string path needed. Falls back to
+        -- the stored icon name from SimdragosaDB if the API returns nil.
+        local icon = C_Item.GetItemIconByID(item.itemID)
+        if icon then
+            row.iconTex:SetTexture(icon)
+        elseif item.icon and item.icon ~= "" then
+            row.iconTex:SetTexture("Interface\\Icons\\" .. item.icon)
         else
-            iconPath = select(10, GetItemInfoInstant(item.itemID))
-            if not iconPath then
-                GetItemInfo(item.itemID)  -- queue load; RW_Refresh called on event
-            end
+            row.iconTex:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
         end
-        row.iconTex:SetTexture(iconPath or "Interface\\Icons\\INV_Misc_QuestionMark")
 
         -- Bar
         local pct   = math.max(0.02, item.dps / maxDPS)
