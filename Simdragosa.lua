@@ -471,17 +471,7 @@ local function RW_GetOrCreateRow(idx)
         if self.itemID then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetItemByID(self.itemID)
-            -- Override the "Item Level X" line (always line 2) with the sim ilvl.
-            -- SetItemByID shows the base unscaled item; we inject the actual sim ilvl.
             if self.simIlvl then
-                local ilvlLine = _G["GameTooltipTextLeft2"]
-                if ilvlLine then
-                    local txt = ilvlLine:GetText() or ""
-                    if txt:find("Item Level") then
-                        ilvlLine:SetText("Item Level " .. self.simIlvl)
-                        GameTooltip:Show()   -- reflow after text change
-                    end
-                end
                 GameTooltip:AddLine(" ")
                 GameTooltip:AddDoubleLine(
                     C.label .. "Simdragosa" .. C.reset,
