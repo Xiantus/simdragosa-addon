@@ -454,10 +454,12 @@ local ILVL_BONUS_IDS = {
 local function BuildScaledItemLink(itemID, itemName, ilvl)
     local bonuses = ILVL_BONUS_IDS[ilvl]
     if not bonuses then return nil end
-    -- |Hitem:ID:0:0:0:0:0:0:0:0:0:0:0:0:numBonuses:b1:b2:...|h[Name]|h
+    -- Retail item link format:
+    -- |Hitem:id:enchant:gem1:gem2:gem3:gem4:suffix:uid:level:spec:upgradeType:instanceDiff:numBonusIDs:b1:...|h[Name]|h
+    -- 12 zero fields between itemID and numBonusIDs.
+    local name = (itemName or ("Item #" .. itemID)):gsub("|", "")
     return string.format("|Hitem:%d:0:0:0:0:0:0:0:0:0:0:0:0:%d:%s|h[%s]|h",
-        itemID, #bonuses, table.concat(bonuses, ":"),
-        (itemName or ("Item #" .. itemID)):gsub("|", ""))
+        itemID, #bonuses, table.concat(bonuses, ":"), name)
 end
 
 -- ── Row helpers ───────────────────────────────────────────────────────────────
@@ -518,8 +520,10 @@ local function RW_GetOrCreateRow(idx)
                 BuildScaledItemLink(self.itemID, self.itemName, self.simIlvl)
             if scaledLink then
                 GameTooltip:SetHyperlink(scaledLink)
+                GameTooltip:AddLine("|cff888888[SDR] scaled link ilvl " .. (self.simIlvl or "?") .. "|r")
             else
                 GameTooltip:SetItemByID(self.itemID)
+                GameTooltip:AddLine("|cff888888[SDR] fallback ilvl " .. (self.simIlvl or "?") .. "|r")
                 if self.simIlvl then
                     GameTooltip:AddLine(" ")
                     GameTooltip:AddDoubleLine(
