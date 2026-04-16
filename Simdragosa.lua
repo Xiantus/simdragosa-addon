@@ -675,8 +675,22 @@ end
 local function RW_Open()
     rw.charKey    = GetCharKey()
     rw.specList   = RW_GetSpecs(rw.charKey)
-    rw.specIdx    = 1
-    rw.trackList  = RW_GetTracks(rw.charKey, rw.specList[1])
+
+    -- Default to the player's current spec
+    local defaultSpecIdx = 1
+    local curSpecSlot = GetSpecialization()
+    if curSpecSlot then
+        local curSpecId = select(1, GetSpecializationInfo(curSpecSlot))
+        local curSpecName = curSpecId and SIMC_SPEC[curSpecId]
+        if curSpecName then
+            for i, s in ipairs(rw.specList) do
+                if s == curSpecName then defaultSpecIdx = i; break end
+            end
+        end
+    end
+
+    rw.specIdx    = defaultSpecIdx
+    rw.trackList  = RW_GetTracks(rw.charKey, rw.specList[rw.specIdx])
     rw.trackIdx   = 1
     rw.sourceList = RW_GetSources(rw.charKey)
     rw.sourceIdx  = 1
