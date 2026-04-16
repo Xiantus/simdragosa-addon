@@ -431,26 +431,30 @@ local ILVL_DELTA_BONUS = {
     [201]=3130,[202]=3131,[203]=3132,[204]=3133,[205]=3134,[206]=3135,[207]=3136,[208]=3137,[209]=3138,[210]=3139,[211]=3140,[212]=3141,[213]=3142,[214]=3143,[215]=3144,[216]=3145,[217]=3146,[218]=3147,[219]=3148,[220]=3149,[221]=3150,[222]=3151,[223]=3152,[224]=3153,[225]=3154,[226]=3155,[227]=3156,[228]=3157,[229]=3158,[230]=3159,[231]=3160,[232]=3161,[233]=3162,[234]=3163,[235]=3164,[236]=3165,[237]=3166,[238]=3167,[239]=3168,[240]=3169,[241]=3170,[242]=3171,[243]=3172,[244]=3173,[245]=3174,[246]=3175,[247]=3176,[248]=3177,[249]=3178,[250]=3179,[251]=3180,[252]=3181,[253]=3182,[254]=3183,[255]=3184,[256]=3185,[257]=3186,[258]=3187,[259]=3188,[260]=3189,[261]=3190,[262]=3191,[263]=3192,[264]=3193,[265]=3194,[266]=3195,[267]=3196,[268]=3197,[269]=3198,[270]=3199,[271]=3200,[272]=3201,[273]=3202,[274]=3203,[275]=3204,[276]=3205,[277]=3206,[278]=3207,[279]=3208,[280]=3209,[281]=3210,[282]=3211,[283]=3212,[284]=3213,[285]=3214,[286]=3215,[287]=3216,[288]=3217,[289]=3218,[290]=3219,[291]=3220,[292]=3221,[293]=3222,[294]=3223,[295]=3224,[296]=3225,[297]=3226,[298]=3227,[299]=3228,[300]=3229,
 }
 
--- Midnight S1: (track, simmedIlvl) → upgrade tier bonus ID.
--- Shows "Upgrade Level: Heroic 6/6" etc in the tooltip cosmetically.
--- Sourced from KeystoneLoot addon (upgrade_tracks.lua). UPDATE EACH SEASON.
-local TRACK_BONUS_IDS = {
-    lfr      = { [233]=12777, [237]=12778, [240]=12779, [243]=12780, [246]=12781, [250]=12782 },
-    normal   = { [246]=12785, [250]=12786, [253]=12787, [256]=12788, [259]=12789, [263]=12790 },
-    heroic   = { [259]=12793, [263]=12794, [266]=12795, [269]=12796, [272]=12797, [276]=12798 },
-    mythic   = { [272]=12801, [276]=12802, [279]=12803, [282]=12804, [285]=12805, [289]=12806 },
+-- Midnight S1: track → max (6/6) ilvl and its bonus ID.
+-- entry.ilvl in the Lua export is always the item's actual equipped ilvl (mythic cap),
+-- so we override per-track to show the correct tier in the tooltip.
+-- UPDATE EACH SEASON.
+local TRACK_DISPLAY = {
+    lfr      = { ilvl = 250, bonusId = 12782 },
+    normal   = { ilvl = 263, bonusId = 12790 },
+    heroic   = { ilvl = 276, bonusId = 12798 },
+    mythic   = { ilvl = 289, bonusId = 12806 },
+    champion = { ilvl = 263, bonusId = 12790 },
 }
 
 -- Build a scaled item link (same technique as KeystoneLoot addon).
--- Uses delta bonus ID for stat scaling + track bonus for upgrade label.
--- Returns nil if item base ilvl not in cache yet; caller falls back to SetItemByID.
-local function BuildScaledItemLink(itemID, ilvl, track)
-    -- C_Item.GetDetailedItemLevelInfo 3rd return = base ilvl (no upgrades applied).
-    -- GetItemInfo 4th return is the *display* level (scaled to player), not the base — don't use it.
+-- entry.ilvl is always the item's actual equipped ilvl (mythic cap), so we ignore it
+-- and derive the correct display ilvl from the track via TRACK_DISPLAY.
+-- Returns nil if base ilvl unavailable (not cached yet); caller falls back to SetItemByID.
+local function BuildScaledItemLink(itemID, track)
+    local td = track and TRACK_DISPLAY[track]
+    if not td then return nil end
+
     local _, _, baseIlvl = C_Item.GetDetailedItemLevelInfo(itemID)
     if not baseIlvl or baseIlvl == 0 then return nil end
 
-    local delta = ilvl - baseIlvl
+    local delta = td.ilvl - baseIlvl
     local deltaBonus = ILVL_DELTA_BONUS[delta]
     if not deltaBonus then return nil end
 
@@ -459,18 +463,9 @@ local function BuildScaledItemLink(itemID, ilvl, track)
     local curSlot = GetSpecialization()
     if curSlot then specId = select(1, GetSpecializationInfo(curSlot)) or 0 end
 
-    -- Track bonus for upgrade label ("Upgrade Level: Heroic 6/6" etc).
-    -- Falls back gracefully if track unknown or ilvl not in track table.
-    local trackBonus = track and TRACK_BONUS_IDS[track] and TRACK_BONUS_IDS[track][ilvl]
-
-    -- Bonus list: delta scaler + track tier (if known) + 1674 (epic quality)
-    if trackBonus then
-        return string.format("item:%d::::::::%d:%d:::3:%d:%d:1674",
-            itemID, playerLevel, specId, deltaBonus, trackBonus)
-    else
-        return string.format("item:%d::::::::%d:%d:::2:%d:1674",
-            itemID, playerLevel, specId, deltaBonus)
-    end
+    -- delta bonus (stat scaling) + track tier bonus (upgrade label) + 1674 (epic quality)
+    return string.format("item:%d::::::::%d:%d:::3:%d:%d:1674",
+        itemID, playerLevel, specId, deltaBonus, td.bonusId)
 end
 
 -- ── Row helpers ───────────────────────────────────────────────────────────────
@@ -525,7 +520,7 @@ local function RW_GetOrCreateRow(idx)
     row:SetScript("OnEnter", function(self)
         if self.itemID then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            local scaledLink = self.simIlvl and BuildScaledItemLink(self.itemID, self.simIlvl, self.simTrack)
+            local scaledLink = BuildScaledItemLink(self.itemID, self.simTrack)
             if scaledLink then
                 GameTooltip:SetHyperlink(scaledLink)
             else
