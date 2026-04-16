@@ -445,8 +445,9 @@ local TRACK_BONUS_IDS = {
 -- Uses delta bonus ID for stat scaling + track bonus for upgrade label.
 -- Returns nil if item base ilvl not in cache yet; caller falls back to SetItemByID.
 local function BuildScaledItemLink(itemID, ilvl, track)
-    -- GetItemInfo 4th return = item level (base, no upgrades). Requires item in client cache.
-    local baseIlvl = select(4, GetItemInfo(itemID))
+    -- C_Item.GetDetailedItemLevelInfo 3rd return = base ilvl (no upgrades applied).
+    -- GetItemInfo 4th return is the *display* level (scaled to player), not the base — don't use it.
+    local _, _, baseIlvl = C_Item.GetDetailedItemLevelInfo(itemID)
     if not baseIlvl or baseIlvl == 0 then return nil end
 
     local delta = ilvl - baseIlvl
@@ -525,18 +526,11 @@ local function RW_GetOrCreateRow(idx)
         if self.itemID then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             local scaledLink = self.simIlvl and BuildScaledItemLink(self.itemID, self.simIlvl, self.simTrack)
-            -- DEBUG: show base ilvl values to diagnose scaling
-            local gi4  = select(4, GetItemInfo(self.itemID))
-            local cd3  = select(3, C_Item.GetDetailedItemLevelInfo(self.itemID))
             if scaledLink then
                 GameTooltip:SetHyperlink(scaledLink)
-                GameTooltip:AddLine(string.format("|cff888888[SDR] sim=%s track=%s gi=%s cd=%s|r",
-                    tostring(self.simIlvl), tostring(self.simTrack), tostring(gi4), tostring(cd3)))
             else
                 -- Fallback: base stats + footer note (item not cached or ilvl out of table)
                 GameTooltip:SetItemByID(self.itemID)
-                GameTooltip:AddLine(string.format("|cff888888[SDR] FALLBACK sim=%s track=%s gi=%s cd=%s|r",
-                    tostring(self.simIlvl), tostring(self.simTrack), tostring(gi4), tostring(cd3)))
                 if self.simIlvl then
                     GameTooltip:AddLine(" ")
                     GameTooltip:AddDoubleLine(
