@@ -408,6 +408,7 @@ local function RW_BuildList(charKey, spec, track, source)
                     name    = entry.name or ("Item #" .. tostring(itemID)),
                     dps     = bestDPS,
                     ilvl    = entry.ilvl,
+                    track   = track,
                     updated = entry.updated,
                     icon    = entry.icon,
                 }
@@ -416,6 +417,55 @@ local function RW_BuildList(charKey, spec, track, source)
     end
     table.sort(list, function(a, b) return a.dps > b.dps end)
     return list
+end
+
+-- ── Scaled tooltip helpers ────────────────────────────────────────────────────
+
+-- ilvl delta → bonus ID (adds N levels to base item ilvl in the client).
+-- Sourced from KeystoneLoot addon (Wolkenschutz/KeystoneLoot on GitHub).
+-- These are universal client DB2 bonus IDs — work for any item.
+local ILVL_DELTA_BONUS = {
+    [-100]=1372,[-99]=1373,[-98]=1374,[-97]=1375,[-96]=1376,[-95]=1377,[-94]=1378,[-93]=1379,[-92]=1380,[-91]=1381,[-90]=1382,[-89]=1383,[-88]=1384,[-87]=1385,[-86]=1386,[-85]=1387,[-84]=1388,[-83]=1389,[-82]=1390,[-81]=1391,[-80]=1392,[-79]=1393,[-78]=1394,[-77]=1395,[-76]=1396,[-75]=1397,[-74]=1398,[-73]=1399,[-72]=1400,[-71]=1401,[-70]=1402,[-69]=1403,[-68]=1404,[-67]=1405,[-66]=1406,[-65]=1407,[-64]=1408,[-63]=1409,[-62]=1410,[-61]=1411,[-60]=1412,[-59]=1413,[-58]=1414,[-57]=1415,[-56]=1416,[-55]=1417,[-54]=1418,[-53]=1419,[-52]=1420,[-51]=1421,[-50]=1422,[-49]=1423,[-48]=1424,[-47]=1425,[-46]=1426,[-45]=1427,[-44]=1428,[-43]=1429,[-42]=1430,[-41]=1431,[-40]=1432,[-39]=1433,[-38]=1434,[-37]=1435,[-36]=1436,[-35]=1437,[-34]=1438,[-33]=1439,[-32]=1440,[-31]=1441,[-30]=1442,[-29]=1443,[-28]=1444,[-27]=1445,[-26]=1446,[-25]=1447,[-24]=1448,[-23]=1449,[-22]=1450,[-21]=1451,[-20]=1452,[-19]=1453,[-18]=1454,[-17]=1455,[-16]=1456,[-15]=1457,[-14]=1458,[-13]=1459,[-12]=1460,[-11]=1461,[-10]=1462,[-9]=1463,[-8]=1464,[-7]=1465,[-6]=1466,[-5]=1467,[-4]=1468,[-3]=1469,[-2]=1470,[-1]=1471,
+    [1]=1473,[2]=1474,[3]=1475,[4]=1476,[5]=1477,[6]=1478,[7]=1479,[8]=1480,[9]=1481,[10]=1482,[11]=1483,[12]=1484,[13]=1485,[14]=1486,[15]=1487,[16]=1488,[17]=1489,[18]=1490,[19]=1491,[20]=1492,[21]=1493,[22]=1494,[23]=1495,[24]=1496,[25]=1497,[26]=1498,[27]=1499,[28]=1500,[29]=1501,[30]=1502,[31]=1503,[32]=1504,[33]=1505,[34]=1506,[35]=1507,[36]=1508,[37]=1509,[38]=1510,[39]=1511,[40]=1512,[41]=1513,[42]=1514,[43]=1515,[44]=1516,[45]=1517,[46]=1518,[47]=1519,[48]=1520,[49]=1521,[50]=1522,[51]=1523,[52]=1524,[53]=1525,[54]=1526,[55]=1527,[56]=1528,[57]=1529,[58]=1530,[59]=1531,[60]=1532,[61]=1533,[62]=1534,[63]=1535,[64]=1536,[65]=1537,[66]=1538,[67]=1539,[68]=1540,[69]=1541,[70]=1542,[71]=1543,[72]=1544,[73]=1545,[74]=1546,[75]=1547,[76]=1548,[77]=1549,[78]=1550,[79]=1551,[80]=1552,[81]=1553,[82]=1554,[83]=1555,[84]=1556,[85]=1557,[86]=1558,[87]=1559,[88]=1560,[89]=1561,[90]=1562,[91]=1563,[92]=1564,[93]=1565,[94]=1566,[95]=1567,[96]=1568,[97]=1569,[98]=1570,[99]=1571,[100]=1572,
+    [101]=1573,[102]=1574,[103]=1575,[104]=1576,[105]=1577,[106]=1578,[107]=1579,[108]=1580,[109]=1581,[110]=1582,[111]=1583,[112]=1584,[113]=1585,[114]=1586,[115]=1587,[116]=1588,[117]=1589,[118]=1590,[119]=1591,[120]=1592,[121]=1593,[122]=1594,[123]=1595,[124]=1596,[125]=1597,[126]=1598,[127]=1599,[128]=1600,[129]=1601,[130]=1602,[131]=1603,[132]=1604,[133]=1605,[134]=1606,[135]=1607,[136]=1608,[137]=1609,[138]=1610,[139]=1611,[140]=1612,[141]=1613,[142]=1614,[143]=1615,[144]=1616,[145]=1617,[146]=1618,[147]=1619,[148]=1620,[149]=1621,[150]=1622,[151]=1623,[152]=1624,[153]=1625,[154]=1626,[155]=1627,[156]=1628,[157]=1629,[158]=1630,[159]=1631,[160]=1632,[161]=1633,[162]=1634,[163]=1635,[164]=1636,[165]=1637,[166]=1638,[167]=1639,[168]=1640,[169]=1641,[170]=1642,[171]=1643,[172]=1644,[173]=1645,[174]=1646,[175]=1647,[176]=1648,[177]=1649,[178]=1650,[179]=1651,[180]=1652,[181]=1653,[182]=1654,[183]=1655,[184]=1656,[185]=1657,[186]=1658,[187]=1659,[188]=1660,[189]=1661,[190]=1662,[191]=1663,[192]=1664,[193]=1665,[194]=1666,[195]=1667,[196]=1668,[197]=1669,[198]=1670,[199]=1671,[200]=1672,
+    [201]=3130,[202]=3131,[203]=3132,[204]=3133,[205]=3134,[206]=3135,[207]=3136,[208]=3137,[209]=3138,[210]=3139,[211]=3140,[212]=3141,[213]=3142,[214]=3143,[215]=3144,[216]=3145,[217]=3146,[218]=3147,[219]=3148,[220]=3149,[221]=3150,[222]=3151,[223]=3152,[224]=3153,[225]=3154,[226]=3155,[227]=3156,[228]=3157,[229]=3158,[230]=3159,[231]=3160,[232]=3161,[233]=3162,[234]=3163,[235]=3164,[236]=3165,[237]=3166,[238]=3167,[239]=3168,[240]=3169,[241]=3170,[242]=3171,[243]=3172,[244]=3173,[245]=3174,[246]=3175,[247]=3176,[248]=3177,[249]=3178,[250]=3179,[251]=3180,[252]=3181,[253]=3182,[254]=3183,[255]=3184,[256]=3185,[257]=3186,[258]=3187,[259]=3188,[260]=3189,[261]=3190,[262]=3191,[263]=3192,[264]=3193,[265]=3194,[266]=3195,[267]=3196,[268]=3197,[269]=3198,[270]=3199,[271]=3200,[272]=3201,[273]=3202,[274]=3203,[275]=3204,[276]=3205,[277]=3206,[278]=3207,[279]=3208,[280]=3209,[281]=3210,[282]=3211,[283]=3212,[284]=3213,[285]=3214,[286]=3215,[287]=3216,[288]=3217,[289]=3218,[290]=3219,[291]=3220,[292]=3221,[293]=3222,[294]=3223,[295]=3224,[296]=3225,[297]=3226,[298]=3227,[299]=3228,[300]=3229,
+}
+
+-- Midnight S1: track → max (6/6) ilvl and its bonus ID.
+-- entry.ilvl in the Lua export is always the item's actual equipped ilvl (mythic cap),
+-- so we override per-track to show the correct tier in the tooltip.
+-- UPDATE EACH SEASON.
+local TRACK_DISPLAY = {
+    lfr      = { ilvl = 250, bonusId = 12782 },
+    normal   = { ilvl = 263, bonusId = 12790 },
+    heroic   = { ilvl = 276, bonusId = 12798 },
+    mythic   = { ilvl = 289, bonusId = 12806 },
+    champion = { ilvl = 263, bonusId = 12790 },
+}
+
+-- Build a scaled item link (same technique as KeystoneLoot addon).
+-- entry.ilvl is always the item's actual equipped ilvl (mythic cap), so we ignore it
+-- and derive the correct display ilvl from the track via TRACK_DISPLAY.
+-- Returns nil if base ilvl unavailable (not cached yet); caller falls back to SetItemByID.
+local function BuildScaledItemLink(itemID, track)
+    local td = track and TRACK_DISPLAY[track]
+    if not td then return nil end
+
+    local _, _, baseIlvl = C_Item.GetDetailedItemLevelInfo(itemID)
+    if not baseIlvl or baseIlvl == 0 then return nil end
+
+    local delta = td.ilvl - baseIlvl
+    local deltaBonus = ILVL_DELTA_BONUS[delta]
+    if not deltaBonus then return nil end
+
+    local playerLevel = UnitLevel("player") or 80
+    local specId = 0
+    local curSlot = GetSpecialization()
+    if curSlot then specId = select(1, GetSpecializationInfo(curSlot)) or 0 end
+
+    -- delta bonus (stat scaling) + track tier bonus (upgrade label) + 1674 (epic quality)
+    return string.format("item:%d::::::::%d:%d:::3:%d:%d:1674",
+        itemID, playerLevel, specId, deltaBonus, td.bonusId)
 end
 
 -- ── Row helpers ───────────────────────────────────────────────────────────────
@@ -470,24 +520,20 @@ local function RW_GetOrCreateRow(idx)
     row:SetScript("OnEnter", function(self)
         if self.itemID then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetItemByID(self.itemID)
-            -- Override the "Item Level X" line (always line 2) with the sim ilvl.
-            -- SetItemByID shows the base unscaled item; we inject the actual sim ilvl.
-            if self.simIlvl then
-                local ilvlLine = _G["GameTooltipTextLeft2"]
-                if ilvlLine then
-                    local txt = ilvlLine:GetText() or ""
-                    if txt:find("Item Level") then
-                        ilvlLine:SetText("Item Level " .. self.simIlvl)
-                        GameTooltip:Show()   -- reflow after text change
-                    end
+            local scaledLink = BuildScaledItemLink(self.itemID, self.simTrack)
+            if scaledLink then
+                GameTooltip:SetHyperlink(scaledLink)
+            else
+                -- Fallback: base stats + footer note (item not cached or ilvl out of table)
+                GameTooltip:SetItemByID(self.itemID)
+                if self.simIlvl then
+                    GameTooltip:AddLine(" ")
+                    GameTooltip:AddDoubleLine(
+                        C.label .. "Simdragosa" .. C.reset,
+                        "|cffffd100Simmed at ilvl " .. self.simIlvl .. "|r",
+                        1, 1, 1, 1, 1, 1
+                    )
                 end
-                GameTooltip:AddLine(" ")
-                GameTooltip:AddDoubleLine(
-                    C.label .. "Simdragosa" .. C.reset,
-                    "|cffffd100Simmed at " .. self.simIlvl .. "|r",
-                    1, 1, 1, 1, 1, 1
-                )
             end
             GameTooltip:Show()
         end
@@ -544,9 +590,11 @@ local function RW_Refresh()
     for i = 1, count do
         local item = list[i]
         local row  = RW_GetOrCreateRow(i)
-        row.itemID  = item.itemID
-        row.simIlvl = item.ilvl
-        row.oddRow  = (i % 2 == 1)
+        row.itemID    = item.itemID
+        row.itemName  = item.name
+        row.simIlvl   = item.ilvl
+        row.simTrack  = item.track
+        row.oddRow    = (i % 2 == 1)
 
         -- Background alternating tint
         if row.oddRow then
@@ -557,18 +605,17 @@ local function RW_Refresh()
 
         row:SetPoint("TOP", rw.content, "TOP", 0, -(i - 1) * RW_ROW_H)
 
-        -- Icon: use preloaded Wowhead icon name from SimdragosaDB if available,
-        -- else fall back to GetItemInfoInstant (WoW client cache).
-        local iconPath
-        if item.icon and item.icon ~= "" then
-            iconPath = "Interface\\Icons\\" .. item.icon
+        -- Icon: C_Item.GetItemIconByID returns the numeric file ID directly from
+        -- the client — no cache required, no string path needed. Falls back to
+        -- the stored icon name from SimdragosaDB if the API returns nil.
+        local icon = C_Item.GetItemIconByID(item.itemID)
+        if icon then
+            row.iconTex:SetTexture(icon)
+        elseif item.icon and item.icon ~= "" then
+            row.iconTex:SetTexture("Interface\\Icons\\" .. item.icon)
         else
-            iconPath = select(10, GetItemInfoInstant(item.itemID))
-            if not iconPath then
-                GetItemInfo(item.itemID)  -- queue load; RW_Refresh called on event
-            end
+            row.iconTex:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
         end
-        row.iconTex:SetTexture(iconPath or "Interface\\Icons\\INV_Misc_QuestionMark")
 
         -- Bar
         local pct   = math.max(0.02, item.dps / maxDPS)
@@ -680,6 +727,23 @@ local function RW_OpenSourceDropdown()
     popup:Show()
 end
 
+-- WoW spec ID → SimC spec name (must be declared before RW_Open)
+local SIMC_SPEC_IDS = {
+    [250]="blood",        [251]="frost",         [252]="unholy",
+    [577]="havoc",        [581]="vengeance",
+    [102]="balance",      [103]="feral",         [104]="guardian",     [105]="restoration",
+    [1467]="devastation", [1468]="preservation", [1473]="augmentation",
+    [253]="beast_mastery",[254]="marksmanship",  [255]="survival",
+    [62]="arcane",        [63]="fire",            [64]="frost",
+    [268]="brewmaster",   [270]="mistweaver",    [269]="windwalker",
+    [65]="holy",          [66]="protection",     [70]="retribution",
+    [256]="discipline",   [257]="holy",          [258]="shadow",
+    [259]="assassination",[260]="outlaw",        [261]="subtlety",
+    [262]="elemental",    [263]="enhancement",   [264]="restoration",
+    [265]="affliction",   [266]="demonology",    [267]="destruction",
+    [71]="arms",          [72]="fury",           [73]="protection",
+}
+
 -- ── Open / toggle ─────────────────────────────────────────────────────────────
 
 local function RW_Open()
@@ -691,7 +755,7 @@ local function RW_Open()
     local curSpecSlot = GetSpecialization()
     if curSpecSlot then
         local curSpecId = select(1, GetSpecializationInfo(curSpecSlot))
-        local curSpecName = curSpecId and SIMC_SPEC[curSpecId]
+        local curSpecName = curSpecId and SIMC_SPEC_IDS[curSpecId]
         if curSpecName then
             for i, s in ipairs(rw.specList) do
                 if s == curSpecName then defaultSpecIdx = i; break end
@@ -962,22 +1026,6 @@ local SIMC_CLASS = {
 }
 
 -- WoW spec ID → SimC spec name
-local SIMC_SPEC = {
-    [250]="blood",        [251]="frost",         [252]="unholy",
-    [577]="havoc",        [581]="vengeance",
-    [102]="balance",      [103]="feral",         [104]="guardian",     [105]="restoration",
-    [1467]="devastation", [1468]="preservation", [1473]="augmentation",
-    [253]="beast_mastery",[254]="marksmanship",  [255]="survival",
-    [62]="arcane",        [63]="fire",            [64]="frost",
-    [268]="brewmaster",   [270]="mistweaver",    [269]="windwalker",
-    [65]="holy",          [66]="protection",     [70]="retribution",
-    [256]="discipline",   [257]="holy",          [258]="shadow",
-    [259]="assassination",[260]="outlaw",        [261]="subtlety",
-    [262]="elemental",    [263]="enhancement",   [264]="restoration",
-    [265]="affliction",   [266]="demonology",    [267]="destruction",
-    [71]="arms",          [72]="fury",           [73]="protection",
-}
-
 local REGION_MAP = { [1]="us", [2]="kr", [3]="eu", [4]="tw", [5]="cn" }
 
 -- Parse a WoW item hyperlink into a SimC item field string.
@@ -1038,7 +1086,7 @@ local function BuildSimCProfile()
 
     local specIdx          = GetSpecialization() or 1
     local specId, _, _, _, role = GetSpecializationInfo(specIdx)
-    local simcSpec         = SIMC_SPEC[specId] or "unknown"
+    local simcSpec         = SIMC_SPEC_IDS[specId] or "unknown"
     local simcRole         = (role == "HEALER") and "heal" or (role == "TANK") and "tank" or "attack"
 
     local talentStr = ""
@@ -1092,7 +1140,7 @@ local function SIMC_StoreProfile(profile)
     local charKey = GetCharKey()
     local specIdx = GetSpecialization() or 1
     local specId  = GetSpecializationInfo(specIdx)
-    local spec    = SIMC_SPEC[specId] or "unknown"
+    local spec    = SIMC_SPEC_IDS[specId] or "unknown"
 
     SimdragosaConfig.exports = SimdragosaConfig.exports or {}
     SimdragosaConfig.exports[charKey] = {
@@ -1254,7 +1302,7 @@ local function DoExport()
     local bProfile = BuildSimCProfile()
     local specIdx  = GetSpecialization() or 1
     local specId   = select(1, GetSpecializationInfo(specIdx))
-    local spec     = SIMC_SPEC[specId] or "unknown"
+    local spec     = SIMC_SPEC_IDS[specId] or "unknown"
     SimdragosaConfig.exports = SimdragosaConfig.exports or {}
     SimdragosaConfig.exports[charKey] = {
         simc      = bProfile,

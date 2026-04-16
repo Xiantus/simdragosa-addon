@@ -6,40 +6,32 @@
 - **`develop`** — integration branch for local testing. All feature and fix branches merge here first.
 - **Feature/fix branches** — branch off `develop`, merge back into `develop` when done.
 
-## Rules
+## Development workflow
+
+The git repo at `C:\Users\Xiant\Documents\Projects\simdragosa-addon` is junction-linked
+to `C:\Games\World of Warcraft\_retail_\Interface\AddOns\Simdragosa`.
+**Editing the repo immediately updates the live in-game addon** — `/reload` in WoW is enough to test.
 
 1. Never commit directly to `master`.
-2. Create feature/fix branches from `develop`:
-   ```
-   git checkout develop
-   git checkout -b feature/my-feature
-   ```
-3. Merge completed work into `develop` first:
-   ```
-   git checkout develop
-   git merge feature/my-feature
-   ```
-4. To release, bump `## Version:` in `Simdragosa.toc`, merge `develop` into `master`, push, then tag:
-   ```
-   # On develop — bump TOC version first
-   # Edit Simdragosa.toc: ## Version: X.Y.Z
-   git add Simdragosa.toc
-   git commit -m "release: vX.Y.Z"
-   git checkout master
-   git merge develop
-   git push
-   # Tag AFTER pushing — must use git push for the tag, not gh release create
-   # (gh release create uses the API and does not fire a push event → workflow never runs)
-   git tag vX.Y.Z
-   git push origin vX.Y.Z
-   gh release create vX.Y.Z --title "vX.Y.Z" --notes "..."
-   ```
+2. Make changes on `develop`. User can `/reload` in WoW to test immediately — no release needed.
+3. **Do NOT release until the user explicitly says so.** Wait for confirmation before releasing to CurseForge.
 
-## Versioning rules
+## Release process (on user go-ahead only)
 
-- **Never pre-bump the TOC version.** The `## Version:` in `Simdragosa.toc` must only be set in the release commit, not ahead of time.
-- **TOC version must match the git tag** that triggers the CurseForge release workflow. A CI check enforces this — the workflow fails if they diverge.
-- The BigWigs packager reads the TOC version, not the tag name. A mismatch means CurseForge publishes the wrong version number.
+```
+# On develop — bump TOC version first
+# Edit Simdragosa.toc: ## Version: X.Y.Z
+git add Simdragosa.toc
+git commit -m "release: vX.Y.Z"
+git checkout master
+git merge develop
+git push
+# Tag AFTER pushing — must use git push for the tag, not gh release create
+# (gh release create uses the API and does not fire a push event → workflow never runs)
+git tag vX.Y.Z
+git push origin vX.Y.Z
+gh release create vX.Y.Z --title "vX.Y.Z" --notes "..."
+```
 
 ---
 
