@@ -630,8 +630,7 @@ local function RW_OpenSourceDropdown()
     end
 
     for idx, src in ipairs(rw.sourceList) do
-        local isHeader = (src == "__dungeons__")
-        local isIndented = (idx > dungeonStart and not isHeader)
+        local isIndented = (idx > dungeonStart and src ~= "__dungeons__")
 
         local btn = CreateFrame("Button", nil, popup)
         btn:SetHeight(ROW_H)
@@ -645,28 +644,23 @@ local function RW_OpenSourceDropdown()
         lbl:SetText(RW_SourceDisplay(src))
 
         if idx == rw.sourceIdx then
-            lbl:SetTextColor(1, 0.85, 0)           -- selected: gold
-        elseif isHeader then
-            lbl:SetTextColor(0.55, 0.50, 0.75)     -- section header: muted purple
-            btn:EnableMouse(false)
+            lbl:SetTextColor(1, 0.85, 0)       -- selected: gold
         else
             lbl:SetTextColor(0.88, 0.88, 0.88)
         end
 
-        if not isHeader then
-            local capturedIdx = idx
-            btn:SetScript("OnClick", function()
-                rw.sourceIdx = capturedIdx
-                popup:Hide()
-                RW_Refresh()
-            end)
-            btn:SetScript("OnEnter", function(self)
-                self:SetBackdrop({bgFile="Interface\\ChatFrame\\ChatFrameBackground",
-                                  edgeFile="", tile=true, tileSize=8})
-                self:SetBackdropColor(0.28, 0.22, 0.48, 0.55)
-            end)
-            btn:SetScript("OnLeave", function(self) self:SetBackdrop(nil) end)
-        end
+        local capturedIdx = idx
+        btn:SetScript("OnClick", function()
+            rw.sourceIdx = capturedIdx
+            popup:Hide()
+            RW_Refresh()
+        end)
+        btn:SetScript("OnEnter", function(self)
+            self:SetBackdrop({bgFile="Interface\\ChatFrame\\ChatFrameBackground",
+                              edgeFile="", tile=true, tileSize=8})
+            self:SetBackdropColor(0.28, 0.22, 0.48, 0.55)
+        end)
+        btn:SetScript("OnLeave", function(self) self:SetBackdrop(nil) end)
 
         yOff = yOff + ROW_H
         table.insert(rw.sourceBtns, btn)
@@ -810,7 +804,7 @@ function RW_CreateFrame()
         edgeSize = 8,
         insets   = {left=2, right=2, top=2, bottom=2},
     })
-    srcPopup:SetBackdropColor(0.06, 0.04, 0.14, 0.97)
+    srcPopup:SetBackdropColor(0.06, 0.04, 0.14, 1.0)
     srcPopup:SetBackdropBorderColor(0.38, 0.32, 0.65, 0.8)
     srcPopup:Hide()
     rw.sourcePopup = srcPopup
