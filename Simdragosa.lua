@@ -420,25 +420,33 @@ end
 
 -- ── Scaled tooltip helpers ────────────────────────────────────────────────────
 
--- Midnight S1: item level → bonus ID(s) for correctly-scaled tooltip links.
--- Multiple bonus IDs in a table entry are applied together (e.g. ilvl 256 needs
--- both the track ID and a secondary stat modifier).
+-- Midnight S1: item level → bonus ID for correctly-scaled tooltip links.
+-- Single bonus ID per ilvl (12785-12806 series confirmed via Wowhead brute-force).
 -- UPDATE THIS TABLE EACH SEASON with new bonus IDs.
+-- ilvl 243 bonus ID unknown — gap in Veteran 4/6.
 local ILVL_BONUS_IDS = {
     -- Veteran track (world quests / lower content)
-    [233] = {13341},
-    [237] = {13342},
-    [240] = {13343},
+    [233] = {13341},  -- Veteran 1/6
+    [237] = {13342},  -- Veteran 2/6
+    [240] = {13343},  -- Veteran 3/6
+    -- [243] = ???,   -- Veteran 4/6 — bonus ID not found
+    [246] = {12785},  -- Veteran 5/6 / Champion 1/6
+    [250] = {12786},  -- Veteran 6/6 / Champion 2/6
     -- Champion track (M+ end-of-dungeon)
-    [250] = {13346},
-    [253] = {13347},
-    [256] = {13347, 12374},
-    [259] = {13347, 12373},
-    [263] = {13350},
-    [266] = {13351},
-    -- Hero track (M+ vault / raid tiers) — add 282/285/289/292/295+ as confirmed
-    [276] = {13354},
-    [279] = {13355},
+    [253] = {12787},  -- Champion 3/6
+    [256] = {12788},  -- Champion 4/6
+    [259] = {12789},  -- Champion 5/6 / Hero 1/6
+    [263] = {12790},  -- Champion 6/6 / Hero 2/6
+    -- Hero track (M+ vault)
+    [266] = {12791},  -- Hero 3/6
+    [269] = {12792},  -- Hero 4/6
+    [272] = {12797},  -- Hero 5/6 / Myth 1/6
+    [276] = {12798},  -- Hero 6/6 / Myth 2/6
+    -- Myth track (raid)
+    [279] = {12799},  -- Myth 3/6
+    [282] = {12800},  -- Myth 4/6
+    [285] = {12805},  -- Myth 5/6
+    [289] = {12806},  -- Myth 6/6
 }
 
 -- Build an item hyperlink at a specific ilvl using season bonus IDs.
