@@ -39,6 +39,11 @@ local C = {
 local THRESHOLD_HIGH   = 1500
 local THRESHOLD_MEDIUM = 400
 
+local HEALER_SPECS = {
+    discipline=true, holy=true, restoration=true,
+    mistweaver=true, preservation=true,
+}
+
 -- ---------------------------------------------------------------------------
 -- Helpers
 -- ---------------------------------------------------------------------------
@@ -167,21 +172,22 @@ TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tool
     local gainLines = {}
 
     local function addDiffParts(src, specLabel)
+        local gainLabel = HEALER_SPECS[specLabel] and "HPS" or "DPS"
         local diffParts = {}
         if src.champion and src.champion > 0 then
             local col = ColourForDPS(src.champion)
-            diffParts[#diffParts + 1] = string.format("%s+%s DPS%s %s(Champ)%s",
-                col, FormatDPS(src.champion), C.reset, C.low, C.reset)
+            diffParts[#diffParts + 1] = string.format("%s+%s %s%s %s(Champ)%s",
+                col, FormatDPS(src.champion), gainLabel, C.reset, C.low, C.reset)
         end
         if src.heroic and src.heroic > 0 then
             local col = ColourForDPS(src.heroic)
-            diffParts[#diffParts + 1] = string.format("%s+%s DPS%s %s(Heroic)%s",
-                col, FormatDPS(src.heroic), C.reset, C.low, C.reset)
+            diffParts[#diffParts + 1] = string.format("%s+%s %s%s %s(Heroic)%s",
+                col, FormatDPS(src.heroic), gainLabel, C.reset, C.low, C.reset)
         end
         if src.mythic and src.mythic > 0 then
             local col = ColourForDPS(src.mythic)
-            diffParts[#diffParts + 1] = string.format("%s+%s DPS%s %s(Mythic)%s",
-                col, FormatDPS(src.mythic), C.reset, C.low, C.reset)
+            diffParts[#diffParts + 1] = string.format("%s+%s %s%s %s(Mythic)%s",
+                col, FormatDPS(src.mythic), gainLabel, C.reset, C.low, C.reset)
         end
         if #diffParts > 0 then
             local diffStr = table.concat(diffParts, "  ")
@@ -574,6 +580,10 @@ local function RW_Refresh()
     rw.trackLabel:SetText(trackDisplay)
     rw.sourceBtn:SetText(RW_SourceDisplay(source))
 
+    -- Column header: HPS for healer specs, DPS otherwise
+    local gainHeader = (spec and HEALER_SPECS[spec]) and "HPS GAIN" or "DPS GAIN"
+    rw.hdrGain:SetText(C.low .. gainHeader .. C.reset)
+
     if not track then
         for _, row in ipairs(rw.rows) do row:Hide() end
         rw.content:SetHeight(20)
@@ -917,6 +927,7 @@ function RW_CreateFrame()
     local hdrDPS = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     hdrDPS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -30, -102)
     hdrDPS:SetText(C.low .. "DPS GAIN" .. C.reset)
+    rw.hdrGain = hdrDPS
 
     -- ── Scroll frame ─────────────────────────────────────────────────────────
     local scrollFrame = CreateFrame("ScrollFrame", "SimdragosaResultsScroll", f)
