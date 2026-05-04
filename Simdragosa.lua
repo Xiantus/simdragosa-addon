@@ -17,6 +17,9 @@ local DEFAULTS = {
     enabled        = true,
     stalenessDays  = 30,   -- hide entries older than this many days
     showStaleness  = true, -- show "Simmed: N days ago" line
+    minimapHidden  = false,
+    minimapAngle   = nil,  -- radians; nil = default position
+    lastSource     = nil,  -- persisted source filter
 }
 
 -- ---------------------------------------------------------------------------
@@ -123,6 +126,7 @@ frame:SetScript("OnEvent", function(self, event, addonName)
 
         -- Build the results window now that config is initialised.
         RW_CreateFrame()
+        RW_CreateMinimapButton()
 
         -- Restore saved window position.
         if SimdragosaConfig.windowPos and SimdragosaResultsFrame then
@@ -215,15 +219,21 @@ TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tool
         tooltip:AddLine(line)
     end
 
-    -- Staleness footer
+    -- Staleness footer + /sdr hint
     if SimdragosaConfig.showStaleness then
         local when = FormatStaleness(entry.updated)
         if when then
             tooltip:AddLine(string.format(
-                "%s%s — simmed %s%s",
-                C.label, ADDON, when, C.reset
+                "%s%s — simmed %s  %s·  /sdr results%s",
+                C.label, ADDON, when, C.stale, C.reset
             ))
+        else
+            tooltip:AddLine(C.label .. ADDON .. C.reset
+                .. "  " .. C.stale .. "·  /sdr results" .. C.reset)
         end
+    else
+        tooltip:AddLine(C.label .. ADDON .. C.reset
+            .. "  " .. C.stale .. "·  /sdr results" .. C.reset)
     end
 end)
 
@@ -231,13 +241,26 @@ end)
 -- Results Window
 -- ---------------------------------------------------------------------------
 
-local RW_W      = 370    -- frame width
-local RW_H      = 470    -- frame height (extra row for source filter)
-local RW_ROW_H  = 22     -- row height (px)
-local RW_ICON_W = 20     -- item icon size
-local RW_BAR_X  = 28     -- bar start X (icon + gap)
-local RW_BAR_W  = 234    -- DPS bar max width
+local RW_W      = 420    -- frame width
+local RW_H      = 500    -- frame height
+local RW_ROW_H  = 28     -- row height (two-line layout)
+local RW_ICON_W = 18     -- item icon size
+local RW_NAME_W = 140    -- item name column width
+local RW_BAR_X  = 168    -- bar start X (icon + name + gaps)
+local RW_BAR_W  = 148    -- DPS bar max width
 local RW_DPS_W  = 62     -- DPS value column width
+
+-- Rank-relative bar colours: 1st=legendary, 2nd=epic, 3rd=rare, 4th=uncommon, 5th+=grey
+local RW_RANK_COLORS = {
+    {0.99, 0.50, 0.00},  -- 1st: legendary orange
+    {0.64, 0.21, 0.93},  -- 2nd: epic purple
+    {0.00, 0.44, 0.87},  -- 3rd: rare blue
+    {0.12, 0.93, 0.00},  -- 4th: uncommon green
+    {0.62, 0.62, 0.62},  -- 5th+: grey
+}
+local function RW_RankColor(rank)
+    return RW_RANK_COLORS[math.min(rank, #RW_RANK_COLORS)]
+end
 
 local RW_TRACK_LABELS = { champion = "Champion", heroic = "Heroic", mythic = "Mythic" }
 local RW_TRACK_ORDER  = { "champion", "heroic", "mythic" }
@@ -267,6 +290,7 @@ local rw = {
     frame       = nil,
     content     = nil,
     rows        = {},   -- pool of reusable row sub-frames
+    titleLabel  = nil,  -- dynamic header: char name + upgrade count
     specLabel   = nil,
     trackLabel  = nil,
     sourceBtn   = nil,   -- dropdown toggle button text label
@@ -501,17 +525,33 @@ local function RW_GetOrCreateRow(idx)
     iconTex:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
     row.iconTex = iconTex
 
-    -- DPS bar background
+    -- Item name (top line)
+    local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    nameText:SetPoint("TOPLEFT", row, "TOPLEFT", RW_ICON_W + 8, -4)
+    nameText:SetWidth(RW_NAME_W)
+    nameText:SetJustifyH("LEFT")
+    nameText:SetWordWrap(false)
+    row.nameText = nameText
+
+    -- Track/ilvl sub-line (bottom)
+    local subText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    subText:SetPoint("TOPLEFT", row, "TOPLEFT", RW_ICON_W + 8, -17)
+    subText:SetWidth(RW_NAME_W)
+    subText:SetJustifyH("LEFT")
+    subText:SetWordWrap(false)
+    row.subText = subText
+
+    -- DPS bar background (subtle purple tint)
     local barBg = row:CreateTexture(nil, "ARTWORK")
-    barBg:SetPoint("LEFT", row, "LEFT", RW_BAR_X, -5)
-    barBg:SetSize(RW_BAR_W, 9)
-    barBg:SetColorTexture(0.12, 0.12, 0.12, 1)
+    barBg:SetPoint("LEFT", row, "LEFT", RW_BAR_X, 0)
+    barBg:SetSize(RW_BAR_W, 12)
+    barBg:SetColorTexture(0.16, 0.10, 0.28, 0.85)
     row.barBg = barBg
 
     -- DPS bar fill (OVERLAY so it always draws on top of the background)
     local barFill = row:CreateTexture(nil, "OVERLAY")
-    barFill:SetPoint("LEFT", row, "LEFT", RW_BAR_X, -5)
-    barFill:SetHeight(9)
+    barFill:SetPoint("LEFT", row, "LEFT", RW_BAR_X, 0)
+    barFill:SetHeight(12)
     barFill:SetWidth(1)
     row.barFill = barFill
 
@@ -527,19 +567,39 @@ local function RW_GetOrCreateRow(idx)
         if self.itemID then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             local scaledLink = BuildScaledItemLink(self.itemID, self.simTrack)
+            local td = self.simTrack and TRACK_DISPLAY[self.simTrack]
             if scaledLink then
                 GameTooltip:SetHyperlink(scaledLink)
+                -- Always show which track + ilvl was simmed
+                if td then
+                    GameTooltip:AddLine(" ")
+                    local trackName = RW_TRACK_LABELS[self.simTrack] or self.simTrack or ""
+                    GameTooltip:AddDoubleLine(
+                        C.label .. "Simdragosa" .. C.reset,
+                        "|cff9a8cffSimmed: " .. trackName .. " " .. td.ilvl .. "|r",
+                        1, 1, 1, 1, 1, 1
+                    )
+                    GameTooltip:AddLine(C.low .. "/sdr results to open upgrade window" .. C.reset)
+                end
             else
                 -- Fallback: base stats + footer note (item not cached or ilvl out of table)
                 GameTooltip:SetItemByID(self.itemID)
-                if self.simIlvl then
-                    GameTooltip:AddLine(" ")
+                GameTooltip:AddLine(" ")
+                if td then
+                    local trackName = RW_TRACK_LABELS[self.simTrack] or self.simTrack or ""
+                    GameTooltip:AddDoubleLine(
+                        C.label .. "Simdragosa" .. C.reset,
+                        "|cff9a8cffSimmed: " .. trackName .. " " .. td.ilvl .. "|r",
+                        1, 1, 1, 1, 1, 1
+                    )
+                elseif self.simIlvl then
                     GameTooltip:AddDoubleLine(
                         C.label .. "Simdragosa" .. C.reset,
                         "|cffffd100Simmed at ilvl " .. self.simIlvl .. "|r",
                         1, 1, 1, 1, 1, 1
                     )
                 end
+                GameTooltip:AddLine(C.low .. "/sdr results to open upgrade window" .. C.reset)
             end
             GameTooltip:Show()
         end
@@ -587,11 +647,22 @@ local function RW_Refresh()
     if not track then
         for _, row in ipairs(rw.rows) do row:Hide() end
         rw.content:SetHeight(20)
+        if rw.titleLabel then
+            local charName = (rw.charKey:match("^([^%-]+)") or rw.charKey):upper()
+            rw.titleLabel:SetText(C.label .. charName .. C.reset .. "  |cff7878a0—|r")
+        end
         rw.footer:SetText(C.low .. "No sim data found. Run a sim and /reload." .. C.reset)
         return
     end
 
     local list   = RW_BuildList(rw.charKey, spec, track, source)
+
+    -- Dynamic title: char name + upgrade count
+    if rw.titleLabel then
+        local charName = (rw.charKey:match("^([^%-]+)") or rw.charKey):upper()
+        rw.titleLabel:SetText(C.label .. charName .. C.reset
+            .. "  |cff7878a0" .. #list .. " upgrades|r")
+    end
     local maxDPS = (list[1] and list[1].dps) or 1
     local count  = math.min(#list, 40)
 
@@ -608,7 +679,7 @@ local function RW_Refresh()
 
         -- Background alternating tint
         if row.oddRow then
-            row.bg:SetColorTexture(0.08, 0.08, 0.08, 0.3)
+            row.bg:SetColorTexture(0.09, 0.07, 0.15, 0.4)
         else
             row.bg:SetColorTexture(0, 0, 0, 0)
         end
@@ -627,21 +698,29 @@ local function RW_Refresh()
             row.iconTex:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
         end
 
-        -- Bar
-        local pct   = math.max(0.02, item.dps / maxDPS)
-        local fillW = math.max(2, math.floor(RW_BAR_W * pct))
-        row.barFill:SetWidth(fillW)
-        if item.dps >= THRESHOLD_HIGH then
-            row.barFill:SetColorTexture(0.29, 0.87, 0.50, 0.9)
-        elseif item.dps >= THRESHOLD_MEDIUM then
-            row.barFill:SetColorTexture(0.98, 0.75, 0.14, 0.9)
-        else
-            row.barFill:SetColorTexture(0.47, 0.47, 0.63, 0.9)
-        end
+        -- Item name (truncated to fit column)
+        local displayName = item.name or ("Item #" .. tostring(item.itemID))
+        if #displayName > 22 then displayName = displayName:sub(1, 20) .. "…" end
+        row.nameText:SetText(displayName)
+        row.nameText:SetTextColor(0.95, 0.95, 0.95, 1)
 
-        -- DPS value
-        local col = ColourForDPS(item.dps)
-        row.dpsText:SetText(col .. RW_FormatDPS(item.dps) .. C.reset)
+        -- Sub-line: track label + ilvl
+        local td = item.track and TRACK_DISPLAY[item.track]
+        local trackName = (item.track and RW_TRACK_LABELS[item.track]) or ""
+        local trackIlvl = td and td.ilvl or item.ilvl or ""
+        row.subText:SetText(string.format("|cff9a8cff%s %s|r", trackName, tostring(trackIlvl)))
+
+        -- Bar — rank-relative colour (1st=orange, 2nd=purple, 3rd=blue, 4th=green, 5th+=grey)
+        local rc     = RW_RankColor(i)
+        local pct    = math.max(0.02, item.dps / maxDPS)
+        local fillW  = math.max(2, math.floor(RW_BAR_W * pct))
+        row.barFill:SetWidth(fillW)
+        row.barFill:SetColorTexture(rc[1], rc[2], rc[3], 0.85)
+
+        -- DPS value coloured to match rank
+        row.dpsText:SetText(string.format("|cff%02x%02x%02x%s|r",
+            math.floor(rc[1] * 255), math.floor(rc[2] * 255), math.floor(rc[3] * 255),
+            RW_FormatDPS(item.dps)))
 
         row:Show()
     end
@@ -719,6 +798,10 @@ local function RW_OpenSourceDropdown()
         local capturedIdx = idx
         btn:SetScript("OnClick", function()
             rw.sourceIdx = capturedIdx
+            -- Persist selection across sessions
+            if SimdragosaConfig then
+                SimdragosaConfig.lastSource = rw.sourceList[capturedIdx]
+            end
             popup:Hide()
             RW_Refresh()
         end)
@@ -777,7 +860,16 @@ local function RW_Open()
     rw.trackList  = RW_GetTracks(rw.charKey, rw.specList[rw.specIdx])
     rw.trackIdx   = 1
     rw.sourceList = RW_GetSources(rw.charKey)
-    rw.sourceIdx  = 1
+
+    -- Restore last-used source filter (persisted in config)
+    rw.sourceIdx = 1
+    local lastSrc = SimdragosaConfig and SimdragosaConfig.lastSource
+    if lastSrc then
+        for i, src in ipairs(rw.sourceList) do
+            if src == lastSrc then rw.sourceIdx = i; break end
+        end
+    end
+
     rw.frame:Show()
     RW_Refresh()
 end
@@ -815,10 +907,13 @@ function RW_CreateFrame()
     f:SetBackdropColor(0, 0, 0, 0.93)
     f:SetBackdropBorderColor(0.38, 0.32, 0.65, 1)
 
-    -- Title
+    -- Title (dynamic — updated by RW_Refresh with char name + count)
     local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -12)
+    title:SetPoint("RIGHT",   f, "RIGHT",  -40, 0)
+    title:SetJustifyH("LEFT")
     title:SetText(C.label .. "SIMDRAGOSA" .. C.reset .. "  RESULTS")
+    rw.titleLabel = title
 
     -- Close button
     local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
@@ -935,7 +1030,7 @@ function RW_CreateFrame()
     scrollFrame:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -28,   30)
 
     local content = CreateFrame("Frame", nil, scrollFrame)
-    content:SetWidth(RW_W - 40)
+    content:SetWidth(RW_W - 44)
     content:SetHeight(200)
     scrollFrame:SetScrollChild(content)
     rw.content = content
@@ -993,6 +1088,91 @@ function RW_CreateFrame()
             end)
         end
     end)
+end
+
+-- ---------------------------------------------------------------------------
+-- Minimap button
+-- ---------------------------------------------------------------------------
+
+local function RW_CreateMinimapButton()
+    local angle = math.rad(220)  -- position on minimap edge
+    local radius = 80            -- distance from minimap centre
+
+    local btn = CreateFrame("Button", "SimdragosaMinimapButton", Minimap)
+    btn:SetSize(32, 32)
+    btn:SetFrameStrata("MEDIUM")
+    btn:SetPoint("CENTER", Minimap, "CENTER",
+        radius * math.cos(angle), radius * math.sin(angle))
+    btn:SetClampedToScreen(true)
+    btn:RegisterForDrag("LeftButton")
+
+    -- Circular backdrop
+    local bg = btn:CreateTexture(nil, "BACKGROUND")
+    bg:SetSize(32, 32)
+    bg:SetAllPoints()
+    bg:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+
+    -- Frost/dragon themed icon (Spell_Frost_Frozencore)
+    local icon = btn:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(20, 20)
+    icon:SetPoint("CENTER")
+    icon:SetTexture("Interface\\Icons\\Spell_Frost_Frozencore")
+    icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+
+    -- Drag to reposition along minimap edge
+    btn:SetScript("OnDragStart", function(self)
+        self:LockHighlight()
+        self:SetScript("OnUpdate", function(self)
+            local mx, my = Minimap:GetCenter()
+            local cx, cy = GetCursorPosition()
+            local uiScale = UIParent:GetScale()
+            cx, cy = cx / uiScale, cy / uiScale
+            local dx, dy = cx - mx, cy - my
+            local a = math.atan2(dy, dx)
+            local r = 80
+            self:SetPoint("CENTER", Minimap, "CENTER",
+                r * math.cos(a), r * math.sin(a))
+            if SimdragosaConfig then
+                SimdragosaConfig.minimapAngle = a
+            end
+        end)
+    end)
+    btn:SetScript("OnDragStop", function(self)
+        self:UnlockHighlight()
+        self:SetScript("OnUpdate", nil)
+    end)
+
+    btn:SetScript("OnClick", function(self, button)
+        if button == "RightButton" then
+            -- right-click hides the button
+            self:Hide()
+            if SimdragosaConfig then SimdragosaConfig.minimapHidden = true end
+        else
+            RW_Toggle()
+        end
+    end)
+    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+
+    btn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:AddLine("|cff9a8cffSimdragosa|r")
+        GameTooltip:AddLine("Click to toggle upgrade results", 1, 1, 1)
+        GameTooltip:AddLine("Right-click to hide button", 0.6, 0.6, 0.6)
+        GameTooltip:AddLine("|cff7878a0Drag to reposition|r")
+        GameTooltip:Show()
+    end)
+    btn:SetScript("OnLeave", GameTooltip_Hide)
+
+    -- Restore saved position / visibility
+    if SimdragosaConfig then
+        if SimdragosaConfig.minimapHidden then
+            btn:Hide()
+        elseif SimdragosaConfig.minimapAngle then
+            local a = SimdragosaConfig.minimapAngle
+            btn:SetPoint("CENTER", Minimap, "CENTER",
+                radius * math.cos(a), radius * math.sin(a))
+        end
+    end
 end
 
 -- ---------------------------------------------------------------------------
@@ -1354,6 +1534,14 @@ SlashCmdList["SIMDRAGOSA"] = function(msg)
     elseif cmd == "results" or cmd == "r" then
         RW_Toggle()
 
+    elseif cmd == "minimap" then
+        local b = _G["SimdragosaMinimapButton"]
+        if b then
+            b:Show()
+            SimdragosaConfig.minimapHidden = false
+            print(C.label .. ADDON .. C.reset .. ": minimap button shown.")
+        end
+
     elseif cmd == "toggle" then
         SimdragosaConfig.enabled = not SimdragosaConfig.enabled
         local state = SimdragosaConfig.enabled and "enabled" or "disabled"
@@ -1446,6 +1634,7 @@ SlashCmdList["SIMDRAGOSA"] = function(msg)
         print("  /sdr export            — capture from open /simc window (or manual fallback); /reload to flush")
         print("  /sdr export off        — opt this character out of auto-sim detection")
         print("  /sdr results           — open/close the upgrade results window")
+        print("  /sdr minimap           — show the minimap button if hidden")
         print("  /sdr toggle            — show/hide tooltip lines")
         print("  /sdr status            — show stored item count for your character")
         print("  /sdr staleness <n>     — hide sims older than N days (0 = never)")
