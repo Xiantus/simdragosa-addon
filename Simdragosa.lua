@@ -22,6 +22,8 @@ local DEFAULTS = {
     lastSource     = nil,  -- persisted source filter
 }
 
+local RW_CreateMinimapButton  -- forward declaration (defined after ADDON_LOADED)
+
 -- ---------------------------------------------------------------------------
 -- Colour palette (matches the Simdragosa web app theme)
 -- ---------------------------------------------------------------------------
@@ -1094,7 +1096,7 @@ end
 -- Minimap button
 -- ---------------------------------------------------------------------------
 
-local function RW_CreateMinimapButton()
+RW_CreateMinimapButton = function()
     local angle = math.rad(220)  -- position on minimap edge
     local radius = 80            -- distance from minimap centre
 
