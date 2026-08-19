@@ -2,7 +2,7 @@
 ## Title: Simdragosa
 ## Notes: Companion to the Simdragosa desktop app (github.com/Xiantus/simdragosa-standalone). Shows Droptimizer DPS gains on item tooltips. Type /sdr export to capture your SimC profile and sync it with the app automatically. Type /sdr for all commands.
 ## Author: Xiantus
-## Version: 1.6.2
+## Version: 1.6.3
 ## IconTexture: Interface\AddOns\Simdragosa\simdragosa-icon
 ## X-Curse-Project-ID: 1499663
 ## SavedVariables: SimdragosaConfig
