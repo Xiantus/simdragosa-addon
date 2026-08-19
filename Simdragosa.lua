@@ -463,16 +463,25 @@ local ILVL_DELTA_BONUS = {
     [201]=3130,[202]=3131,[203]=3132,[204]=3133,[205]=3134,[206]=3135,[207]=3136,[208]=3137,[209]=3138,[210]=3139,[211]=3140,[212]=3141,[213]=3142,[214]=3143,[215]=3144,[216]=3145,[217]=3146,[218]=3147,[219]=3148,[220]=3149,[221]=3150,[222]=3151,[223]=3152,[224]=3153,[225]=3154,[226]=3155,[227]=3156,[228]=3157,[229]=3158,[230]=3159,[231]=3160,[232]=3161,[233]=3162,[234]=3163,[235]=3164,[236]=3165,[237]=3166,[238]=3167,[239]=3168,[240]=3169,[241]=3170,[242]=3171,[243]=3172,[244]=3173,[245]=3174,[246]=3175,[247]=3176,[248]=3177,[249]=3178,[250]=3179,[251]=3180,[252]=3181,[253]=3182,[254]=3183,[255]=3184,[256]=3185,[257]=3186,[258]=3187,[259]=3188,[260]=3189,[261]=3190,[262]=3191,[263]=3192,[264]=3193,[265]=3194,[266]=3195,[267]=3196,[268]=3197,[269]=3198,[270]=3199,[271]=3200,[272]=3201,[273]=3202,[274]=3203,[275]=3204,[276]=3205,[277]=3206,[278]=3207,[279]=3208,[280]=3209,[281]=3210,[282]=3211,[283]=3212,[284]=3213,[285]=3214,[286]=3215,[287]=3216,[288]=3217,[289]=3218,[290]=3219,[291]=3220,[292]=3221,[293]=3222,[294]=3223,[295]=3224,[296]=3225,[297]=3226,[298]=3227,[299]=3228,[300]=3229,
 }
 
--- Midnight S1: track → max (6/6) ilvl and its bonus ID.
+-- Midnight S2 (patch 12.1): track → max (6/6) ilvl and its bonus ID.
 -- entry.ilvl in the Lua export is always the item's actual equipped ilvl (mythic cap),
 -- so we override per-track to show the correct tier in the tooltip.
 -- UPDATE EACH SEASON.
+--
+-- Values come from Raidbots' static data: /static/data/<hash>/bonuses.json,
+-- entries with an "upgrade" key, taking each group's max level.
+-- Season 2 groups: 614 Adventurer, 615 Veteran, 616 Champion, 617 Hero, 618 Myth.
+--   Veteran  6/6 = 295 (12830)   <- LFR
+--   Champion 6/6 = 308 (12838)   <- Normal
+--   Hero     6/6 = 321 (12846)   <- Heroic
+--   Myth     6/6 = 334 (12854)   <- Mythic
+-- (S1 was 250/263/276/289 — bonus IDs 12782/12790/12798/12806.)
 local TRACK_DISPLAY = {
-    lfr      = { ilvl = 250, bonusId = 12782 },
-    normal   = { ilvl = 263, bonusId = 12790 },
-    heroic   = { ilvl = 276, bonusId = 12798 },
-    mythic   = { ilvl = 289, bonusId = 12806 },
-    champion = { ilvl = 263, bonusId = 12790 },
+    lfr      = { ilvl = 295, bonusId = 12830 },
+    normal   = { ilvl = 308, bonusId = 12838 },
+    heroic   = { ilvl = 321, bonusId = 12846 },
+    mythic   = { ilvl = 334, bonusId = 12854 },
+    champion = { ilvl = 308, bonusId = 12838 },
 }
 
 -- Build a scaled item link (same technique as KeystoneLoot addon).
