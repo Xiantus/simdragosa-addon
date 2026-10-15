@@ -12,10 +12,23 @@ WoW addon companion for [Simdragosa](https://github.com/Xiantus/simdragosa-stand
 
 ```
 [Frost]  +1.2k DPS (Heroic)  +1.5k DPS (Mythic)
+[Fire · loot]  +900 DPS (Heroic)
+Drops from: Kith'ix
+Alts: Brakka +3.3k
 Simdragosa — simmed 2 days ago
 ```
 
+Your current spec is listed first; other specs are greyed and your loot spec is labelled. Tracks you already wear at that item level or higher are greyed ("have 321"), and items you already own are called out. Old sims are dimmed rather than hidden. For warbound or BoE gear, the **Alts** line shows which of your other characters gains most.
+
 No logout needed — type `/reload` after the desktop app finishes a sim and the new data is live.
+
+**Results window** — `/sdr results` or the minimap button. Resizable. Lists upgrades for your spec and track with the boss or dungeon each drops from; **View: Sources** ranks bosses and dungeons by the total upgrade value they hold. Click a source to see its items.
+
+**Loot & vault alerts** — a chat line when you loot an upgrade, when someone else loots one you'd want (so you can ask for a trade), when a roll comes up on one, and a ranked list of your Great Vault choices when you open the vault.
+
+**Encounter Journal badges** — loot rows in the dungeon journal show your gain for the difficulty you're viewing.
+
+**Which key / boss** — `/sdr keys` ranks dungeons and `/sdr bosses` ranks raid bosses by how much upgrade value they hold for your spec.
 
 **SimC export helper** — type `/sdr export` in-game and the addon opens the SimulationCraft window, captures your full profile (gear, talents, stats), and stores it in your SavedVariables. The desktop app detects the new export automatically and pre-fills your character's SimC string — no copy-pasting required.
 
@@ -54,9 +67,21 @@ Install from [CurseForge](https://www.curseforge.com/wow/addons/simdragosa) via 
 | `/sdr toggle` | Show or hide DPS gain lines on tooltips |
 | `/sdr results` | Open the in-game results window |
 | `/sdr status` | Show how many items have sim data loaded for your character |
-| `/sdr staleness <days>` | Hide results older than N days (0 = always show) |
+| `/sdr keys` | Rank dungeons by upgrade value for your spec |
+| `/sdr bosses` | Rank raid bosses by upgrade value for your spec |
+| `/sdr vault` | List Great Vault choices that are upgrades |
+| `/sdr loot` | Turn loot / roll / vault upgrade alerts on or off |
+| `/sdr alts` | Show or hide the alt-gains line on tooltips |
+| `/sdr staleness <days>` | Sims older than N days count as stale (0 = never) |
+| `/sdr staleness hide\|dim` | Hide stale sims, or dim them (default) |
 | `/sdr debug` | Show your character key and all stored sim data |
 | `/sdr debug <itemID>` | Check sim data for a specific item ID |
+
+---
+
+## Development
+
+`python tests/run.py` runs the addon under Lua 5.1 with a stubbed WoW API (needs `pip install lupa`). It checks the logic and that every UI path runs; it cannot show how anything looks in game.
 
 ---
 
