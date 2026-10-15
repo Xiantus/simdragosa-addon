@@ -195,6 +195,14 @@ TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tool
             diffParts[#diffParts + 1] = string.format("%s+%s %s%s %s(Mythic)%s",
                 col, FormatDPS(src.mythic), gainLabel, C.reset, C.low, C.reset)
         end
+        -- Crafted gear has no upgrade track; show the winning stat pair instead.
+        if src.crafted and src.crafted > 0 then
+            local col = ColourForDPS(src.crafted)
+            local tag = "Crafted"
+            if entry.stats and entry.stats ~= "" then tag = tag .. " · " .. entry.stats end
+            diffParts[#diffParts + 1] = string.format("%s+%s %s%s %s(%s)%s",
+                col, FormatDPS(src.crafted), gainLabel, C.reset, C.low, tag, C.reset)
+        end
         if #diffParts > 0 then
             local diffStr = table.concat(diffParts, "  ")
             if specLabel and specLabel ~= "" then
@@ -264,12 +272,14 @@ local function RW_RankColor(rank)
     return RW_RANK_COLORS[math.min(rank, #RW_RANK_COLORS)]
 end
 
-local RW_TRACK_LABELS = { champion = "Champion", heroic = "Heroic", mythic = "Mythic" }
-local RW_TRACK_ORDER  = { "champion", "heroic", "mythic" }
+local RW_TRACK_LABELS = { champion = "Champion", heroic = "Heroic", mythic = "Mythic", crafted = "Crafted" }
+local RW_TRACK_ORDER  = { "champion", "heroic", "mythic", "crafted" }
 
 -- Static zone-ID → name table for Midnight Season 1 dungeons.
--- Keys are Wowhead zone/area IDs; updated each season.
--- Used as last-resort fallback when dynamic WoW APIs return nothing.
+-- Keys are Wowhead zone/area IDs. Only consulted for numeric sources, as a
+-- last-resort fallback when dynamic WoW APIs return nothing. Since Season 2
+-- the desktop app exports dungeon sources as names ("Murder Row"), so no
+-- Season 2 entries are needed; these stay for older stored results.
 local RW_ZONE_NAMES = {
     -- Midnight Season 1 — new dungeons
     [15829] = "Magisters' Terrace",
@@ -357,15 +367,18 @@ local function RW_GetSources(charKey)
     if not SimdragosaDB then return {""} end
     local charData = GetCharData(charKey)
     if not charData then return {""} end
-    local hasRaids = false
+    local hasRaids, hasCrafted = false, false
     local dungeons, seenDungeons = {}, {}
     for _, entry in pairs(charData) do
         local src   = entry.source     or ""
         local stype = entry.sourceType or ""
         -- Raids: only track presence — Raidbots puts boss encounter IDs in
         -- source for raid items, which we don't want as individual filter tabs.
+        -- Crafted: one pool ("Epic Profession Items"), so presence is enough too.
         if stype == "raid" then
             hasRaids = true
+        elseif stype == "crafted" then
+            hasCrafted = true
         elseif stype == "dungeon" and src ~= "" and not seenDungeons[src] then
             seenDungeons[src] = true; dungeons[#dungeons + 1] = src
         end
@@ -374,6 +387,9 @@ local function RW_GetSources(charKey)
     local list = {""}  -- "" = All Sources
     if hasRaids then
         list[#list + 1] = "__raids__"
+    end
+    if hasCrafted then
+        list[#list + 1] = "__crafted__"
     end
     if #dungeons > 0 then
         list[#list + 1] = "__dungeons__"
@@ -386,6 +402,7 @@ local function RW_SourceDisplay(src)
     if not src or src == ""  then return "All Sources"  end
     if src == "__raids__"    then return "All Raids"    end
     if src == "__dungeons__" then return "All Dungeons" end
+    if src == "__crafted__"  then return "Crafted"      end
     local numId = tonumber(src)
     if numId then
         -- 1. Encounter Journal instance name (raids + dungeons by EJ ID)
@@ -416,8 +433,9 @@ local function RW_BuildList(charKey, spec, track, source)
     local charData = GetCharData(charKey)
     if not charData then return {} end
     local list = {}
-    local srcFilter     = (source and source ~= "" and source ~= "__raids__" and source ~= "__dungeons__") and source or nil
-    local srcTypeFilter = (source == "__raids__" and "raid") or (source == "__dungeons__" and "dungeon") or nil
+    local SOURCE_TYPES  = { __raids__ = "raid", __dungeons__ = "dungeon", __crafted__ = "crafted" }
+    local srcTypeFilter = source and SOURCE_TYPES[source] or nil
+    local srcFilter     = (source and source ~= "" and not srcTypeFilter) and source or nil
     for itemID, entry in pairs(charData) do
         local srcOK = true
         if srcFilter     and (entry.source     or "") ~= srcFilter     then srcOK = false end
@@ -443,6 +461,7 @@ local function RW_BuildList(charKey, spec, track, source)
                     track   = track,
                     updated = entry.updated,
                     icon    = entry.icon,
+                    stats   = entry.stats,
                 }
             end
         end
@@ -487,15 +506,18 @@ local TRACK_DISPLAY = {
 -- Build a scaled item link (same technique as KeystoneLoot addon).
 -- entry.ilvl is always the item's actual equipped ilvl (mythic cap), so we ignore it
 -- and derive the correct display ilvl from the track via TRACK_DISPLAY.
+-- Crafted items are the exception: they have no upgrade track, so they scale to
+-- the simmed ilvl (entry.ilvl) and get no track tier bonus.
 -- Returns nil if base ilvl unavailable (not cached yet); caller falls back to SetItemByID.
-local function BuildScaledItemLink(itemID, track)
+local function BuildScaledItemLink(itemID, track, simIlvl)
     local td = track and TRACK_DISPLAY[track]
-    if not td then return nil end
+    local targetIlvl = (td and td.ilvl) or (track == "crafted" and simIlvl) or nil
+    if not targetIlvl then return nil end
 
     local _, _, baseIlvl = C_Item.GetDetailedItemLevelInfo(itemID)
     if not baseIlvl or baseIlvl == 0 then return nil end
 
-    local delta = td.ilvl - baseIlvl
+    local delta = targetIlvl - baseIlvl
     local deltaBonus = ILVL_DELTA_BONUS[delta]
     if not deltaBonus then return nil end
 
@@ -504,9 +526,26 @@ local function BuildScaledItemLink(itemID, track)
     local curSlot = GetSpecialization()
     if curSlot then specId = select(1, GetSpecializationInfo(curSlot)) or 0 end
 
+    if not td then
+        -- crafted: delta bonus (stat scaling) + 1674 (epic quality)
+        return string.format("item:%d::::::::%d:%d:::2:%d:1674",
+            itemID, playerLevel, specId, deltaBonus)
+    end
     -- delta bonus (stat scaling) + track tier bonus (upgrade label) + 1674 (epic quality)
     return string.format("item:%d::::::::%d:%d:::3:%d:%d:1674",
         itemID, playerLevel, specId, deltaBonus, td.bonusId)
+end
+
+-- What a row was simmed as: "Heroic 321", or "Crafted 331 · crit/mastery".
+-- Track ilvl comes from TRACK_DISPLAY; crafted has no track, so it uses entry.ilvl.
+local function RW_SimLabel(track, simIlvl, stats)
+    local td = track and TRACK_DISPLAY[track]
+    local label = string.format("%s %s",
+        (track and RW_TRACK_LABELS[track]) or track or "", tostring((td and td.ilvl) or simIlvl or ""))
+    if track == "crafted" and stats and stats ~= "" then
+        label = label .. " · " .. stats
+    end
+    return label
 end
 
 -- ── Row helpers ───────────────────────────────────────────────────────────────
@@ -577,17 +616,18 @@ local function RW_GetOrCreateRow(idx)
     row:SetScript("OnEnter", function(self)
         if self.itemID then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            local scaledLink = BuildScaledItemLink(self.itemID, self.simTrack)
-            local td = self.simTrack and TRACK_DISPLAY[self.simTrack]
+            local scaledLink = BuildScaledItemLink(self.itemID, self.simTrack, self.simIlvl)
+            local hasLabel = (self.simTrack and TRACK_DISPLAY[self.simTrack])
+                or (self.simTrack == "crafted" and self.simIlvl)
+            local simLabel = hasLabel and RW_SimLabel(self.simTrack, self.simIlvl, self.simStats)
             if scaledLink then
                 GameTooltip:SetHyperlink(scaledLink)
                 -- Always show which track + ilvl was simmed
-                if td then
+                if simLabel then
                     GameTooltip:AddLine(" ")
-                    local trackName = RW_TRACK_LABELS[self.simTrack] or self.simTrack or ""
                     GameTooltip:AddDoubleLine(
                         C.label .. "Simdragosa" .. C.reset,
-                        "|cff9a8cffSimmed: " .. trackName .. " " .. td.ilvl .. "|r",
+                        "|cff9a8cffSimmed: " .. simLabel .. "|r",
                         1, 1, 1, 1, 1, 1
                     )
                     GameTooltip:AddLine(C.low .. "/sdr results to open upgrade window" .. C.reset)
@@ -596,11 +636,10 @@ local function RW_GetOrCreateRow(idx)
                 -- Fallback: base stats + footer note (item not cached or ilvl out of table)
                 GameTooltip:SetItemByID(self.itemID)
                 GameTooltip:AddLine(" ")
-                if td then
-                    local trackName = RW_TRACK_LABELS[self.simTrack] or self.simTrack or ""
+                if simLabel then
                     GameTooltip:AddDoubleLine(
                         C.label .. "Simdragosa" .. C.reset,
-                        "|cff9a8cffSimmed: " .. trackName .. " " .. td.ilvl .. "|r",
+                        "|cff9a8cffSimmed: " .. simLabel .. "|r",
                         1, 1, 1, 1, 1, 1
                     )
                 elseif self.simIlvl then
@@ -686,6 +725,7 @@ local function RW_Refresh()
         row.itemName  = item.name
         row.simIlvl   = item.ilvl
         row.simTrack  = item.track
+        row.simStats  = item.stats
         row.oddRow    = (i % 2 == 1)
 
         -- Background alternating tint
@@ -715,11 +755,8 @@ local function RW_Refresh()
         row.nameText:SetText(displayName)
         row.nameText:SetTextColor(0.95, 0.95, 0.95, 1)
 
-        -- Sub-line: track label + ilvl
-        local td = item.track and TRACK_DISPLAY[item.track]
-        local trackName = (item.track and RW_TRACK_LABELS[item.track]) or ""
-        local trackIlvl = td and td.ilvl or item.ilvl or ""
-        row.subText:SetText(string.format("|cff9a8cff%s %s|r", trackName, tostring(trackIlvl)))
+        -- Sub-line: track label + ilvl (crafted: entry ilvl + winning stat pair)
+        row.subText:SetText(string.format("|cff9a8cff%s|r", RW_SimLabel(item.track, item.ilvl, item.stats)))
 
         -- Bar — rank-relative colour (1st=orange, 2nd=purple, 3rd=blue, 4th=green, 5th+=grey)
         local rc     = RW_RankColor(i)
@@ -1622,6 +1659,7 @@ SlashCmdList["SIMDRAGOSA"] = function(msg)
                 if e.ilvl    then print(string.format("    ilvl    = %d",  e.ilvl))    end
                 if e.name    then print(string.format("    name    = %s",  e.name))    end
                 if e.updated then print(string.format("    updated = %s",  e.updated)) end
+                if e.stats   then print(string.format("    stats   = %s",  e.stats))   end
                 if e.specs then
                     for _, sd in ipairs(e.specs) do
                         local specLabel = (sd.spec and sd.spec ~= "") and sd.spec or "?"
@@ -1629,6 +1667,7 @@ SlashCmdList["SIMDRAGOSA"] = function(msg)
                         if sd.champion then parts[#parts+1] = string.format("champ=%.1f",  sd.champion) end
                         if sd.heroic   then parts[#parts+1] = string.format("heroic=%.1f", sd.heroic)   end
                         if sd.mythic   then parts[#parts+1] = string.format("mythic=%.1f", sd.mythic)   end
+                        if sd.crafted  then parts[#parts+1] = string.format("crafted=%.1f", sd.crafted) end
                         print(string.format("    [%s]  %s", specLabel, table.concat(parts, "  ")))
                     end
                 end
