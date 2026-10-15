@@ -2,3 +2,4 @@ package-as: Simdragosa
 
 ignore:
   - .pkgmeta
+  - tests
