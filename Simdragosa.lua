@@ -8,6 +8,8 @@
 -- =============================================================================
 
 local ADDON = "Simdragosa"
+local _, ns = ...
+ns = ns or {}
 
 -- ---------------------------------------------------------------------------
 -- Default config
@@ -15,14 +17,21 @@ local ADDON = "Simdragosa"
 
 local DEFAULTS = {
     enabled        = true,
-    stalenessDays  = 30,   -- hide entries older than this many days
+    stalenessDays  = 30,   -- entries older than this many days count as stale
     showStaleness  = true, -- show "Simmed: N days ago" line
     minimapHidden  = false,
     minimapAngle   = nil,  -- radians; nil = default position
     lastSource     = nil,  -- persisted source filter
+    hideStale      = false, -- false: dim sims older than stalenessDays; true: hide them
+    showAlts       = true,  -- tooltip line: which other characters gain from the item
+    lootAlerts     = true,  -- chat line when loot / a roll / the vault is an upgrade
+    windowSize     = nil,   -- { w, h } of the results window
+    rwMode         = "items", -- results window: "items" or "sources"
+    rwSort         = "gain",  -- results window item order: "gain" or "source"
 }
 
 local RW_CreateMinimapButton  -- forward declaration (defined after ADDON_LOADED)
+local RW_SourceSummary        -- forward declaration (defined with the list builders)
 
 -- ---------------------------------------------------------------------------
 -- Colour palette (matches the Simdragosa web app theme)
@@ -47,6 +56,23 @@ local THRESHOLD_MEDIUM = 400
 local HEALER_SPECS = {
     discipline=true, holy=true, restoration=true,
     mistweaver=true, preservation=true,
+}
+
+-- WoW spec ID → SimC spec name
+local SIMC_SPEC_IDS = {
+    [250]="blood",        [251]="frost",         [252]="unholy",
+    [577]="havoc",        [581]="vengeance",
+    [102]="balance",      [103]="feral",         [104]="guardian",     [105]="restoration",
+    [1467]="devastation", [1468]="preservation", [1473]="augmentation",
+    [253]="beast_mastery",[254]="marksmanship",  [255]="survival",
+    [62]="arcane",        [63]="fire",            [64]="frost",
+    [268]="brewmaster",   [270]="mistweaver",    [269]="windwalker",
+    [65]="holy",          [66]="protection",     [70]="retribution",
+    [256]="discipline",   [257]="holy",          [258]="shadow",
+    [259]="assassination",[260]="outlaw",        [261]="subtlety",
+    [262]="elemental",    [263]="enhancement",   [264]="restoration",
+    [265]="affliction",   [266]="demonology",    [267]="destruction",
+    [71]="arms",          [72]="fury",           [73]="protection",
 }
 
 -- ---------------------------------------------------------------------------
@@ -130,7 +156,11 @@ frame:SetScript("OnEvent", function(self, event, addonName)
         RW_CreateFrame()
         RW_CreateMinimapButton()
 
-        -- Restore saved window position.
+        -- Restore saved window size and position.
+        local sz = SimdragosaConfig.windowSize
+        if sz and SimdragosaResultsFrame then
+            SimdragosaResultsFrame:SetSize(sz[1], sz[2])
+        end
         if SimdragosaConfig.windowPos and SimdragosaResultsFrame then
             local p = SimdragosaConfig.windowPos
             SimdragosaResultsFrame:ClearAllPoints()
@@ -149,107 +179,16 @@ frame:SetScript("OnEvent", function(self, event, addonName)
 end)
 
 -- ---------------------------------------------------------------------------
--- Tooltip hook
--- ---------------------------------------------------------------------------
-
-TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tooltip, data)
-    -- Bail early if disabled or DB not loaded
-    if not SimdragosaConfig or not SimdragosaConfig.enabled then return end
-    if not SimdragosaDB then return end
-
-    local itemID = data.id
-    if not itemID or itemID == 0 then return end
-
-    local charKey  = GetCharKey()
-    local charData = GetCharData(charKey)
-    if not charData then return end
-
-    local entry = charData[itemID]
-    if not entry then return end
-
-    -- Staleness check
-    local days = DaysSince(entry.updated)
-    if days and SimdragosaConfig.stalenessDays > 0
-             and days > SimdragosaConfig.stalenessDays then
-        return
-    end
-
-    -- Build DPS gain lines — one per spec, showing all available tracks inline
-    local gainLines = {}
-
-    local function addDiffParts(src, specLabel)
-        local gainLabel = HEALER_SPECS[specLabel] and "HPS" or "DPS"
-        local diffParts = {}
-        if src.champion and src.champion > 0 then
-            local col = ColourForDPS(src.champion)
-            diffParts[#diffParts + 1] = string.format("%s+%s %s%s %s(Champ)%s",
-                col, FormatDPS(src.champion), gainLabel, C.reset, C.low, C.reset)
-        end
-        if src.heroic and src.heroic > 0 then
-            local col = ColourForDPS(src.heroic)
-            diffParts[#diffParts + 1] = string.format("%s+%s %s%s %s(Heroic)%s",
-                col, FormatDPS(src.heroic), gainLabel, C.reset, C.low, C.reset)
-        end
-        if src.mythic and src.mythic > 0 then
-            local col = ColourForDPS(src.mythic)
-            diffParts[#diffParts + 1] = string.format("%s+%s %s%s %s(Mythic)%s",
-                col, FormatDPS(src.mythic), gainLabel, C.reset, C.low, C.reset)
-        end
-        if #diffParts > 0 then
-            local diffStr = table.concat(diffParts, "  ")
-            if specLabel and specLabel ~= "" then
-                gainLines[#gainLines + 1] = string.format("%s[%s]%s  %s",
-                    C.label, specLabel, C.reset, diffStr)
-            else
-                gainLines[#gainLines + 1] = diffStr
-            end
-        end
-    end
-
-    if not entry.specs then return end
-    for _, specData in ipairs(entry.specs) do
-        if specData.spec and specData.spec ~= "" then
-            addDiffParts(specData, specData.spec)
-        end
-    end
-
-    if #gainLines == 0 then return end
-
-    -- Inject into tooltip
-    tooltip:AddLine(" ")  -- visual spacer
-    for _, line in ipairs(gainLines) do
-        tooltip:AddLine(line)
-    end
-
-    -- Staleness footer + /sdr hint
-    if SimdragosaConfig.showStaleness then
-        local when = FormatStaleness(entry.updated)
-        if when then
-            tooltip:AddLine(string.format(
-                "%s%s — simmed %s  %s·  /sdr results%s",
-                C.label, ADDON, when, C.stale, C.reset
-            ))
-        else
-            tooltip:AddLine(C.label .. ADDON .. C.reset
-                .. "  " .. C.stale .. "·  /sdr results" .. C.reset)
-        end
-    else
-        tooltip:AddLine(C.label .. ADDON .. C.reset
-            .. "  " .. C.stale .. "·  /sdr results" .. C.reset)
-    end
-end)
-
--- ---------------------------------------------------------------------------
 -- Results Window
 -- ---------------------------------------------------------------------------
 
-local RW_W      = 420    -- frame width
-local RW_H      = 500    -- frame height
+local RW_W      = 520    -- default frame width (resizable)
+local RW_H      = 540    -- default frame height (resizable)
 local RW_ROW_H  = 28     -- row height (two-line layout)
 local RW_ICON_W = 18     -- item icon size
-local RW_NAME_W = 140    -- item name column width
-local RW_BAR_X  = 168    -- bar start X (icon + name + gaps)
-local RW_BAR_W  = 148    -- DPS bar max width
+local RW_NAME_W = 210    -- item name column width
+local RW_BAR_X  = 238    -- bar start X (icon + name + gaps)
+local RW_BAR_W  = 148    -- DPS bar max width at the default size; rw.barW follows resizes
 local RW_DPS_W  = 62     -- DPS value column width
 
 -- Rank-relative bar colours: 1st=legendary, 2nd=epic, 3rd=rare, 4th=uncommon, 5th+=grey
@@ -264,12 +203,35 @@ local function RW_RankColor(rank)
     return RW_RANK_COLORS[math.min(rank, #RW_RANK_COLORS)]
 end
 
-local RW_TRACK_LABELS = { champion = "Champion", heroic = "Heroic", mythic = "Mythic" }
-local RW_TRACK_ORDER  = { "champion", "heroic", "mythic" }
+local RW_TRACK_LABELS = { champion = "Champion", heroic = "Heroic", mythic = "Mythic", crafted = "Crafted" }
+local RW_TRACK_ORDER  = { "champion", "heroic", "mythic", "crafted" }
+
+-- Midnight S2 (patch 12.1): track → max (6/6) ilvl and its bonus ID.
+-- entry.ilvl in the Lua export is always the item's actual equipped ilvl (mythic cap),
+-- so we override per-track to show the correct tier in the tooltip.
+-- UPDATE EACH SEASON.
+--
+-- Values come from Raidbots' static data: /static/data/<hash>/bonuses.json,
+-- entries with an "upgrade" key, taking each group's max level.
+-- Season 2 groups: 614 Adventurer, 615 Veteran, 616 Champion, 617 Hero, 618 Myth.
+--   Veteran  6/6 = 295 (12830)   <- LFR
+--   Champion 6/6 = 308 (12838)   <- Normal
+--   Hero     6/6 = 321 (12846)   <- Heroic
+--   Myth     6/6 = 334 (12854)   <- Mythic
+-- (S1 was 250/263/276/289 — bonus IDs 12782/12790/12798/12806.)
+local TRACK_DISPLAY = {
+    lfr      = { ilvl = 295, bonusId = 12830 },
+    normal   = { ilvl = 308, bonusId = 12838 },
+    heroic   = { ilvl = 321, bonusId = 12846 },
+    mythic   = { ilvl = 334, bonusId = 12854 },
+    champion = { ilvl = 308, bonusId = 12838 },
+}
 
 -- Static zone-ID → name table for Midnight Season 1 dungeons.
--- Keys are Wowhead zone/area IDs; updated each season.
--- Used as last-resort fallback when dynamic WoW APIs return nothing.
+-- Keys are Wowhead zone/area IDs. Only consulted for numeric sources, as a
+-- last-resort fallback when dynamic WoW APIs return nothing. Since Season 2
+-- the desktop app exports dungeon sources as names ("Murder Row"), so no
+-- Season 2 entries are needed; these stay for older stored results.
 local RW_ZONE_NAMES = {
     -- Midnight Season 1 — new dungeons
     [15829] = "Magisters' Terrace",
@@ -287,6 +249,7 @@ local RW_ZONE_NAMES = {
 -- Keys are challenge mode map IDs (different from zone IDs above).
 local RW_CHALLENGE_MAP_NAMES = {}
 
+local RW_RefreshSources, RW_ShowSource  -- defined after RW_Refresh, which calls them
 -- rw holds all mutable state for the results window.
 local rw = {
     frame       = nil,
@@ -306,6 +269,7 @@ local rw = {
     trackIdx    = 1,
     sourceList  = {},
     sourceIdx   = 1,
+    barW        = RW_BAR_W,
 }
 
 -- ── Data helpers ──────────────────────────────────────────────────────────────
@@ -357,15 +321,18 @@ local function RW_GetSources(charKey)
     if not SimdragosaDB then return {""} end
     local charData = GetCharData(charKey)
     if not charData then return {""} end
-    local hasRaids = false
+    local hasRaids, hasCrafted = false, false
     local dungeons, seenDungeons = {}, {}
     for _, entry in pairs(charData) do
         local src   = entry.source     or ""
         local stype = entry.sourceType or ""
         -- Raids: only track presence — Raidbots puts boss encounter IDs in
         -- source for raid items, which we don't want as individual filter tabs.
+        -- Crafted: one pool ("Epic Profession Items"), so presence is enough too.
         if stype == "raid" then
             hasRaids = true
+        elseif stype == "crafted" then
+            hasCrafted = true
         elseif stype == "dungeon" and src ~= "" and not seenDungeons[src] then
             seenDungeons[src] = true; dungeons[#dungeons + 1] = src
         end
@@ -374,6 +341,9 @@ local function RW_GetSources(charKey)
     local list = {""}  -- "" = All Sources
     if hasRaids then
         list[#list + 1] = "__raids__"
+    end
+    if hasCrafted then
+        list[#list + 1] = "__crafted__"
     end
     if #dungeons > 0 then
         list[#list + 1] = "__dungeons__"
@@ -386,6 +356,7 @@ local function RW_SourceDisplay(src)
     if not src or src == ""  then return "All Sources"  end
     if src == "__raids__"    then return "All Raids"    end
     if src == "__dungeons__" then return "All Dungeons" end
+    if src == "__crafted__"  then return "Crafted"      end
     local numId = tonumber(src)
     if numId then
         -- 1. Encounter Journal instance name (raids + dungeons by EJ ID)
@@ -411,13 +382,223 @@ local function RW_SourceDisplay(src)
     return src
 end
 
+-- ---------------------------------------------------------------------------
+-- Shared lookups: current/loot spec, what the player already owns, gains
+-- ---------------------------------------------------------------------------
+
+-- SimC spec name of the active specialization, e.g. "fire"; nil if unknown.
+local function CurrentSpecName()
+    local slot = GetSpecialization and GetSpecialization()
+    if not slot then return nil end
+    local specId = GetSpecializationInfo(slot)
+    return specId and SIMC_SPEC_IDS[specId] or nil
+end
+
+-- SimC spec name of the loot specialization (0 = "same as current").
+local function LootSpecName()
+    local lootId = GetLootSpecialization and GetLootSpecialization() or 0
+    if not lootId or lootId == 0 then return CurrentSpecName() end
+    return SIMC_SPEC_IDS[lootId]
+end
+
+local EQUIP_SLOTS = { 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 }
+
+-- Item level of the player's equipped copy of itemID, or nil if not worn.
+local function EquippedIlvl(itemID)
+    for _, slot in ipairs(EQUIP_SLOTS) do
+        if GetInventoryItemID("player", slot) == itemID then
+            local link = GetInventoryItemLink("player", slot)
+            local ilvl = link and C_Item.GetDetailedItemLevelInfo(link)
+            return ilvl or 0
+        end
+    end
+    return nil
+end
+
+-- Item level a track sims at.  Crafted (and unknown tracks) use the stored ilvl.
+local function TrackIlvl(track, entry)
+    local td = TRACK_DISPLAY[track]
+    return (td and td.ilvl) or (entry and entry.ilvl) or nil
+end
+
+-- Best gain for one spec (or any spec when spec is nil): gain, track, spec.
+local function BestGain(entry, spec)
+    local best, bestTrack, bestSpec
+    for _, sd in ipairs(entry.specs or {}) do
+        local s = sd.spec and sd.spec:lower() or ""
+        if spec == nil or s == spec then
+            for _, t in ipairs(RW_TRACK_ORDER) do
+                if sd[t] and sd[t] > 0 and (not best or sd[t] > best) then
+                    best, bestTrack, bestSpec = sd[t], t, s
+                end
+            end
+        end
+    end
+    return best, bestTrack, bestSpec
+end
+
+-- Gain on one track for a spec (any spec when that one has no value).
+local function GainForTrack(entry, spec, track)
+    local best, anySpec
+    for _, sd in ipairs(entry.specs or {}) do
+        local v = sd[track]
+        if v and v > 0 then
+            if (sd.spec or ""):lower() == spec then best = v end
+            if not anySpec or v > anySpec then anySpec = v end
+        end
+    end
+    return best or anySpec
+end
+
+-- Difficulty ID (instance, journal and vault raid level all share these) ->
+-- the upgrade track that difficulty drops on.  M+ end-of-run loot is Hero.
+local DIFF_TRACK = {
+    [14] = "champion", [15] = "heroic", [16] = "mythic",   -- raid Normal / Heroic / Mythic
+    [8]  = "heroic",                                       -- Mythic Keystone dungeon
+}
+
+-- Other characters (same account) that gain from this item: sorted best first.
+local function AltGains(itemID, myKey)
+    local out = {}
+    for key, data in pairs(SimdragosaDB or {}) do
+        if not CharKeyMatches(key, myKey) and type(data) == "table" and data[itemID] then
+            local gain = BestGain(data[itemID], nil)
+            if gain then
+                out[#out + 1] = { name = key:match("^([^%-]+)") or key, gain = gain }
+            end
+        end
+    end
+    table.sort(out, function(a, b) return a.gain > b.gain end)
+    return out
+end
+
+local TRACK_SHORT = { champion = "Champ", heroic = "Heroic", mythic = "Mythic", crafted = "Crafted" }
+
+-- ---------------------------------------------------------------------------
+-- Tooltip hook
+-- ---------------------------------------------------------------------------
+
+local function Tooltip_OnItem(tooltip, data)
+    -- Bail early if disabled or DB not loaded
+    if not SimdragosaConfig or not SimdragosaConfig.enabled then return end
+    if not SimdragosaDB then return end
+
+    local itemID = data and data.id
+    if not itemID or itemID == 0 then return end
+
+    local charKey  = GetCharKey()
+    local charData = GetCharData(charKey)
+    local entry    = charData and charData[itemID]
+    local alts     = (SimdragosaConfig.showAlts ~= false) and AltGains(itemID, charKey) or {}
+    if not entry and #alts == 0 then return end
+
+    local lines = {}
+
+    if entry then
+        -- Old sims: dim them (or hide, if the user asked for that).
+        local days  = DaysSince(entry.updated)
+        local stale = days and SimdragosaConfig.stalenessDays > 0
+                      and days > SimdragosaConfig.stalenessDays
+        if stale and SimdragosaConfig.hideStale then return end
+
+        -- Tracks at or below the ilvl you already wear are not upgrades any more.
+        local eqIlvl   = EquippedIlvl(itemID)
+        local owned    = not eqIlvl and C_Item.GetItemCount and C_Item.GetItemCount(itemID, true) > 0
+        local curSpec  = CurrentSpecName()
+        local lootSpec = LootSpecName()
+
+        -- Current spec first, then the rest alphabetically.
+        local specs = {}
+        for _, sd in ipairs(entry.specs or {}) do
+            if sd.spec and sd.spec ~= "" then specs[#specs + 1] = sd end
+        end
+        table.sort(specs, function(a, b)
+            local ac, bc = a.spec:lower() == curSpec, b.spec:lower() == curSpec
+            if ac ~= bc then return ac end
+            return a.spec < b.spec
+        end)
+
+        for _, sd in ipairs(specs) do
+            local specKey   = sd.spec:lower()
+            local isCurrent = (specKey == curSpec) or #specs == 1
+            local gainLabel = HEALER_SPECS[specKey] and "HPS" or "DPS"
+            local parts = {}
+            for _, t in ipairs(RW_TRACK_ORDER) do
+                local v = sd[t]
+                if v and v > 0 then
+                    local tag = TRACK_SHORT[t]
+                    if t == "crafted" and entry.stats and entry.stats ~= "" then
+                        tag = tag .. " · " .. entry.stats
+                    end
+                    local ti = TrackIlvl(t, entry)
+                    local superseded = eqIlvl and ti and eqIlvl >= ti
+                    local col = (stale or superseded or not isCurrent) and C.low or ColourForDPS(v)
+                    if superseded then tag = tag .. ", have " .. eqIlvl end
+                    parts[#parts + 1] = string.format("%s+%s %s%s %s(%s)%s",
+                        col, FormatDPS(v), gainLabel, C.reset, C.low, tag, C.reset)
+                end
+            end
+            if #parts > 0 then
+                local specLabel = sd.spec
+                if specKey == lootSpec and lootSpec ~= curSpec then specLabel = specLabel .. " · loot" end
+                local labelCol = isCurrent and C.label or C.low
+                lines[#lines + 1] = string.format("%s[%s]%s  %s",
+                    labelCol, specLabel, C.reset, table.concat(parts, "  "))
+            end
+        end
+
+        if eqIlvl then
+            lines[#lines + 1] = string.format("%sEquipped at ilvl %d%s", C.hi, eqIlvl, C.reset)
+        elseif owned then
+            lines[#lines + 1] = C.hi .. "You already own one (bags/bank)" .. C.reset
+        end
+
+        if entry.source and entry.source ~= "" then
+            lines[#lines + 1] = string.format("%sDrops from: %s%s", C.low, RW_SourceDisplay(entry.source), C.reset)
+        end
+
+        lines.footerWhen = SimdragosaConfig.showStaleness and FormatStaleness(entry.updated) or nil
+        lines.stale = stale
+    end
+
+    -- Warbound / BoE items: which of your other characters wants it most.
+    if #alts > 0 then
+        local names = {}
+        for i = 1, math.min(3, #alts) do
+            names[#names + 1] = string.format("%s %s+%s%s", alts[i].name, C.green, FormatDPS(alts[i].gain), C.reset)
+        end
+        lines[#lines + 1] = string.format("%sAlts:%s %s%s", C.low, C.reset, table.concat(names, ", "),
+            #alts > 3 and (C.low .. " …" .. C.reset) or "")
+    end
+
+    if #lines == 0 then return end
+
+    tooltip:AddLine(" ")  -- visual spacer
+    for _, line in ipairs(lines) do tooltip:AddLine(line) end
+
+    -- Staleness footer + /sdr hint
+    if lines.footerWhen then
+        tooltip:AddLine(string.format("%s%s — simmed %s%s  %s·  /sdr results%s",
+            C.label, ADDON, lines.footerWhen, lines.stale and " (stale — re-sim)" or "", C.stale, C.reset))
+    else
+        tooltip:AddLine(C.label .. ADDON .. C.reset .. "  " .. C.stale .. "·  /sdr results" .. C.reset)
+    end
+end
+
+if TooltipDataProcessor and Enum and Enum.TooltipDataType then
+    TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, Tooltip_OnItem)
+end
+
+-- ── List builders ─────────────────────────────────────────────────────────────
+
 local function RW_BuildList(charKey, spec, track, source)
     if not SimdragosaDB or not track then return {} end
     local charData = GetCharData(charKey)
     if not charData then return {} end
     local list = {}
-    local srcFilter     = (source and source ~= "" and source ~= "__raids__" and source ~= "__dungeons__") and source or nil
-    local srcTypeFilter = (source == "__raids__" and "raid") or (source == "__dungeons__" and "dungeon") or nil
+    local SOURCE_TYPES  = { __raids__ = "raid", __dungeons__ = "dungeon", __crafted__ = "crafted" }
+    local srcTypeFilter = source and SOURCE_TYPES[source] or nil
+    local srcFilter     = (source and source ~= "" and not srcTypeFilter) and source or nil
     for itemID, entry in pairs(charData) do
         local srcOK = true
         if srcFilter     and (entry.source     or "") ~= srcFilter     then srcOK = false end
@@ -443,11 +624,62 @@ local function RW_BuildList(charKey, spec, track, source)
                     track   = track,
                     updated = entry.updated,
                     icon    = entry.icon,
+                    stats   = entry.stats,
+                    source  = entry.source,
                 }
             end
         end
     end
-    table.sort(list, function(a, b) return a.dps > b.dps end)
+    if SimdragosaConfig and SimdragosaConfig.rwSort == "source" then
+        table.sort(list, function(a, b)
+            local sa, sb = RW_SourceDisplay(a.source), RW_SourceDisplay(b.source)
+            if sa ~= sb then return sa < sb end
+            return a.dps > b.dps
+        end)
+    else
+        table.sort(list, function(a, b) return a.dps > b.dps end)
+    end
+    return list
+end
+
+-- Upgrades grouped by where they drop: { name, src, count, total, topName, topID }
+-- sorted by total gain.  `track` nil = each item at its best track.
+-- `sourceType` ("raid" / "dungeon" / "crafted") narrows it; nil = everything.
+RW_SourceSummary = function(charKey, spec, track, sourceType)
+    local charData = GetCharData(charKey)
+    if not charData then return {} end
+    local groups, list = {}, {}
+    for itemID, entry in pairs(charData) do
+        if not sourceType or entry.sourceType == sourceType then
+            local gain
+            if track then
+                for _, sd in ipairs(entry.specs or {}) do
+                    local s = sd.spec and sd.spec:lower() or ""
+                    if (spec == nil or s == spec) and sd[track] and sd[track] > 0
+                       and (not gain or sd[track] > gain) then gain = sd[track] end
+                end
+            else
+                gain = BestGain(entry, spec)
+            end
+            if gain then
+                local src = entry.source or ""
+                local name = src ~= "" and RW_SourceDisplay(src) or "Unknown source"
+                local g = groups[name]
+                if not g then
+                    g = { name = name, src = src, count = 0, total = 0, top = 0, topName = "", topID = nil }
+                    groups[name] = g
+                    list[#list + 1] = g
+                end
+                g.count = g.count + 1
+                g.total = g.total + gain
+                if gain > g.top then
+                    g.top, g.topID = gain, tonumber(itemID)
+                    g.topName = entry.name or ("Item #" .. tostring(itemID))
+                end
+            end
+        end
+    end
+    table.sort(list, function(a, b) return a.total > b.total end)
     return list
 end
 
@@ -463,39 +695,21 @@ local ILVL_DELTA_BONUS = {
     [201]=3130,[202]=3131,[203]=3132,[204]=3133,[205]=3134,[206]=3135,[207]=3136,[208]=3137,[209]=3138,[210]=3139,[211]=3140,[212]=3141,[213]=3142,[214]=3143,[215]=3144,[216]=3145,[217]=3146,[218]=3147,[219]=3148,[220]=3149,[221]=3150,[222]=3151,[223]=3152,[224]=3153,[225]=3154,[226]=3155,[227]=3156,[228]=3157,[229]=3158,[230]=3159,[231]=3160,[232]=3161,[233]=3162,[234]=3163,[235]=3164,[236]=3165,[237]=3166,[238]=3167,[239]=3168,[240]=3169,[241]=3170,[242]=3171,[243]=3172,[244]=3173,[245]=3174,[246]=3175,[247]=3176,[248]=3177,[249]=3178,[250]=3179,[251]=3180,[252]=3181,[253]=3182,[254]=3183,[255]=3184,[256]=3185,[257]=3186,[258]=3187,[259]=3188,[260]=3189,[261]=3190,[262]=3191,[263]=3192,[264]=3193,[265]=3194,[266]=3195,[267]=3196,[268]=3197,[269]=3198,[270]=3199,[271]=3200,[272]=3201,[273]=3202,[274]=3203,[275]=3204,[276]=3205,[277]=3206,[278]=3207,[279]=3208,[280]=3209,[281]=3210,[282]=3211,[283]=3212,[284]=3213,[285]=3214,[286]=3215,[287]=3216,[288]=3217,[289]=3218,[290]=3219,[291]=3220,[292]=3221,[293]=3222,[294]=3223,[295]=3224,[296]=3225,[297]=3226,[298]=3227,[299]=3228,[300]=3229,
 }
 
--- Midnight S2 (patch 12.1): track → max (6/6) ilvl and its bonus ID.
--- entry.ilvl in the Lua export is always the item's actual equipped ilvl (mythic cap),
--- so we override per-track to show the correct tier in the tooltip.
--- UPDATE EACH SEASON.
---
--- Values come from Raidbots' static data: /static/data/<hash>/bonuses.json,
--- entries with an "upgrade" key, taking each group's max level.
--- Season 2 groups: 614 Adventurer, 615 Veteran, 616 Champion, 617 Hero, 618 Myth.
---   Veteran  6/6 = 295 (12830)   <- LFR
---   Champion 6/6 = 308 (12838)   <- Normal
---   Hero     6/6 = 321 (12846)   <- Heroic
---   Myth     6/6 = 334 (12854)   <- Mythic
--- (S1 was 250/263/276/289 — bonus IDs 12782/12790/12798/12806.)
-local TRACK_DISPLAY = {
-    lfr      = { ilvl = 295, bonusId = 12830 },
-    normal   = { ilvl = 308, bonusId = 12838 },
-    heroic   = { ilvl = 321, bonusId = 12846 },
-    mythic   = { ilvl = 334, bonusId = 12854 },
-    champion = { ilvl = 308, bonusId = 12838 },
-}
-
 -- Build a scaled item link (same technique as KeystoneLoot addon).
 -- entry.ilvl is always the item's actual equipped ilvl (mythic cap), so we ignore it
 -- and derive the correct display ilvl from the track via TRACK_DISPLAY.
+-- Crafted items are the exception: they have no upgrade track, so they scale to
+-- the simmed ilvl (entry.ilvl) and get no track tier bonus.
 -- Returns nil if base ilvl unavailable (not cached yet); caller falls back to SetItemByID.
-local function BuildScaledItemLink(itemID, track)
+local function BuildScaledItemLink(itemID, track, simIlvl)
     local td = track and TRACK_DISPLAY[track]
-    if not td then return nil end
+    local targetIlvl = (td and td.ilvl) or (track == "crafted" and simIlvl) or nil
+    if not targetIlvl then return nil end
 
     local _, _, baseIlvl = C_Item.GetDetailedItemLevelInfo(itemID)
     if not baseIlvl or baseIlvl == 0 then return nil end
 
-    local delta = td.ilvl - baseIlvl
+    local delta = targetIlvl - baseIlvl
     local deltaBonus = ILVL_DELTA_BONUS[delta]
     if not deltaBonus then return nil end
 
@@ -504,9 +718,26 @@ local function BuildScaledItemLink(itemID, track)
     local curSlot = GetSpecialization()
     if curSlot then specId = select(1, GetSpecializationInfo(curSlot)) or 0 end
 
+    if not td then
+        -- crafted: delta bonus (stat scaling) + 1674 (epic quality)
+        return string.format("item:%d::::::::%d:%d:::2:%d:1674",
+            itemID, playerLevel, specId, deltaBonus)
+    end
     -- delta bonus (stat scaling) + track tier bonus (upgrade label) + 1674 (epic quality)
     return string.format("item:%d::::::::%d:%d:::3:%d:%d:1674",
         itemID, playerLevel, specId, deltaBonus, td.bonusId)
+end
+
+-- What a row was simmed as: "Heroic 321", or "Crafted 331 · crit/mastery".
+-- Track ilvl comes from TRACK_DISPLAY; crafted has no track, so it uses entry.ilvl.
+local function RW_SimLabel(track, simIlvl, stats)
+    local td = track and TRACK_DISPLAY[track]
+    local label = string.format("%s %s",
+        (track and RW_TRACK_LABELS[track]) or track or "", tostring((td and td.ilvl) or simIlvl or ""))
+    if track == "crafted" and stats and stats ~= "" then
+        label = label .. " · " .. stats
+    end
+    return label
 end
 
 -- ── Row helpers ───────────────────────────────────────────────────────────────
@@ -555,7 +786,7 @@ local function RW_GetOrCreateRow(idx)
     -- DPS bar background (subtle purple tint)
     local barBg = row:CreateTexture(nil, "ARTWORK")
     barBg:SetPoint("LEFT", row, "LEFT", RW_BAR_X, 0)
-    barBg:SetSize(RW_BAR_W, 12)
+    barBg:SetSize(rw.barW, 12)
     barBg:SetColorTexture(0.16, 0.10, 0.28, 0.85)
     row.barBg = barBg
 
@@ -575,19 +806,29 @@ local function RW_GetOrCreateRow(idx)
 
     -- Tooltip on hover / shift-click to link
     row:SetScript("OnEnter", function(self)
-        if self.itemID then
+        if self.sourceRow then
+            local g = self.sourceRow
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            local scaledLink = BuildScaledItemLink(self.itemID, self.simTrack)
-            local td = self.simTrack and TRACK_DISPLAY[self.simTrack]
+            GameTooltip:AddLine(g.name, 1, 1, 1)
+            GameTooltip:AddLine(string.format("%d upgrade%s, %s total", g.count, g.count ~= 1 and "s" or "",
+                RW_FormatDPS(g.total)), 0.6, 0.55, 1)
+            GameTooltip:AddLine("Best: " .. g.topName .. "  " .. RW_FormatDPS(g.top), 0.9, 0.9, 0.9)
+            GameTooltip:AddLine(C.low .. "Click to list these items" .. C.reset)
+            GameTooltip:Show()
+        elseif self.itemID then
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            local scaledLink = BuildScaledItemLink(self.itemID, self.simTrack, self.simIlvl)
+            local hasLabel = (self.simTrack and TRACK_DISPLAY[self.simTrack])
+                or (self.simTrack == "crafted" and self.simIlvl)
+            local simLabel = hasLabel and RW_SimLabel(self.simTrack, self.simIlvl, self.simStats)
             if scaledLink then
                 GameTooltip:SetHyperlink(scaledLink)
                 -- Always show which track + ilvl was simmed
-                if td then
+                if simLabel then
                     GameTooltip:AddLine(" ")
-                    local trackName = RW_TRACK_LABELS[self.simTrack] or self.simTrack or ""
                     GameTooltip:AddDoubleLine(
                         C.label .. "Simdragosa" .. C.reset,
-                        "|cff9a8cffSimmed: " .. trackName .. " " .. td.ilvl .. "|r",
+                        "|cff9a8cffSimmed: " .. simLabel .. "|r",
                         1, 1, 1, 1, 1, 1
                     )
                     GameTooltip:AddLine(C.low .. "/sdr results to open upgrade window" .. C.reset)
@@ -596,11 +837,10 @@ local function RW_GetOrCreateRow(idx)
                 -- Fallback: base stats + footer note (item not cached or ilvl out of table)
                 GameTooltip:SetItemByID(self.itemID)
                 GameTooltip:AddLine(" ")
-                if td then
-                    local trackName = RW_TRACK_LABELS[self.simTrack] or self.simTrack or ""
+                if simLabel then
                     GameTooltip:AddDoubleLine(
                         C.label .. "Simdragosa" .. C.reset,
-                        "|cff9a8cffSimmed: " .. trackName .. " " .. td.ilvl .. "|r",
+                        "|cff9a8cffSimmed: " .. simLabel .. "|r",
                         1, 1, 1, 1, 1, 1
                     )
                 elseif self.simIlvl then
@@ -619,12 +859,16 @@ local function RW_GetOrCreateRow(idx)
     row:SetScript("OnLeave", function(self)
         GameTooltip:Hide()
         if self.oddRow then
-            self.bg:SetColorTexture(0.08, 0.08, 0.08, 0.3)
+            self.bg:SetColorTexture(0.09, 0.07, 0.15, 0.4)
         else
             self.bg:SetColorTexture(0, 0, 0, 0)
         end
     end)
     row:SetScript("OnClick", function(self)
+        if self.sourceRow then
+            RW_ShowSource(self.sourceRow.src)
+            return
+        end
         if self.itemID and IsShiftKeyDown() then
             local _, link = GetItemInfo(self.itemID)
             if link then ChatEdit_InsertLink(link) end
@@ -666,6 +910,11 @@ local function RW_Refresh()
         return
     end
 
+    if SimdragosaConfig.rwMode == "sources" then
+        RW_RefreshSources(spec, track)
+        return
+    end
+
     local list   = RW_BuildList(rw.charKey, spec, track, source)
 
     -- Dynamic title: char name + upgrade count
@@ -675,7 +924,7 @@ local function RW_Refresh()
             .. "  |cff7878a0" .. #list .. " upgrades|r")
     end
     local maxDPS = (list[1] and list[1].dps) or 1
-    local count  = math.min(#list, 40)
+    local count  = #list
 
     rw.content:SetHeight(math.max(count * RW_ROW_H, 20))
 
@@ -686,6 +935,8 @@ local function RW_Refresh()
         row.itemName  = item.name
         row.simIlvl   = item.ilvl
         row.simTrack  = item.track
+        row.simStats  = item.stats
+        row.sourceRow = nil
         row.oddRow    = (i % 2 == 1)
 
         -- Background alternating tint
@@ -709,22 +960,29 @@ local function RW_Refresh()
             row.iconTex:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
         end
 
-        -- Item name (truncated to fit column)
-        local displayName = item.name or ("Item #" .. tostring(item.itemID))
-        if #displayName > 22 then displayName = displayName:sub(1, 20) .. "…" end
-        row.nameText:SetText(displayName)
-        row.nameText:SetTextColor(0.95, 0.95, 0.95, 1)
+        -- Item name (the font string truncates with "..." at the column width)
+        row.nameText:SetText(item.name or ("Item #" .. tostring(item.itemID)))
 
-        -- Sub-line: track label + ilvl
-        local td = item.track and TRACK_DISPLAY[item.track]
-        local trackName = (item.track and RW_TRACK_LABELS[item.track]) or ""
-        local trackIlvl = td and td.ilvl or item.ilvl or ""
-        row.subText:SetText(string.format("|cff9a8cff%s %s|r", trackName, tostring(trackIlvl)))
+        -- Already wearing it at this ilvl or better: not an upgrade, so grey it out.
+        local eq = EquippedIlvl(item.itemID)
+        local trackIlvl = TrackIlvl(item.track, item)
+        local superseded = eq and trackIlvl and eq >= trackIlvl
+        if superseded then
+            row.nameText:SetTextColor(0.5, 0.5, 0.55, 1)
+        else
+            row.nameText:SetTextColor(0.95, 0.95, 0.95, 1)
+        end
+
+        -- Sub-line: track label + ilvl (crafted: entry ilvl + winning stat pair) + source
+        local sub = RW_SimLabel(item.track, item.ilvl, item.stats)
+        if item.source and item.source ~= "" then sub = sub .. " · " .. RW_SourceDisplay(item.source) end
+        if eq then sub = sub .. (superseded and " · have " .. eq or " · wearing " .. eq) end
+        row.subText:SetText(string.format("|cff9a8cff%s|r", sub))
 
         -- Bar — rank-relative colour (1st=orange, 2nd=purple, 3rd=blue, 4th=green, 5th+=grey)
         local rc     = RW_RankColor(i)
         local pct    = math.max(0.02, item.dps / maxDPS)
-        local fillW  = math.max(2, math.floor(RW_BAR_W * pct))
+        local fillW  = math.max(2, math.floor(rw.barW * pct))
         row.barFill:SetWidth(fillW)
         row.barFill:SetColorTexture(rc[1], rc[2], rc[3], 0.85)
 
@@ -749,6 +1007,61 @@ local function RW_Refresh()
         "%s%d upgrade%s  ·  simmed %s%s",
         C.low, #list, #list ~= 1 and "s" or "", whenStr, C.reset
     ))
+end
+
+-- Sources view: one row per boss / dungeon, ranked by total gain on offer.
+-- "Which key should I run" / "which boss matters" at a glance.
+RW_RefreshSources = function(spec, track)
+    local rows = RW_SourceSummary(rw.charKey, spec, track, nil)
+    local charName = (rw.charKey:match("^([^%-]+)") or rw.charKey):upper()
+    rw.titleLabel:SetText(C.label .. charName .. C.reset .. "  |cff7878a0" .. #rows .. " sources|r")
+    rw.hdrGain:SetText(C.low .. "TOTAL GAIN" .. C.reset)
+    local maxTotal = (rows[1] and rows[1].total) or 1
+    rw.content:SetHeight(math.max(#rows * RW_ROW_H, 20))
+    for i, g in ipairs(rows) do
+        local row = RW_GetOrCreateRow(i)
+        row.itemID, row.sourceRow, row.oddRow = nil, g, (i % 2 == 1)
+        row.bg:SetColorTexture(row.oddRow and 0.09 or 0, row.oddRow and 0.07 or 0, row.oddRow and 0.15 or 0, row.oddRow and 0.4 or 0)
+        row:SetPoint("TOP", rw.content, "TOP", 0, -(i - 1) * RW_ROW_H)
+        local icon = g.topID and C_Item.GetItemIconByID(g.topID)
+        row.iconTex:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+        row.nameText:SetText(g.name)
+        row.nameText:SetTextColor(0.95, 0.95, 0.95, 1)
+        row.subText:SetText(string.format("|cff9a8cff%d upgrade%s · top: %s|r", g.count, g.count ~= 1 and "s" or "", g.topName))
+        local rc = RW_RankColor(i)
+        row.barFill:SetWidth(math.max(2, math.floor(rw.barW * math.max(0.02, g.total / maxTotal))))
+        row.barFill:SetColorTexture(rc[1], rc[2], rc[3], 0.85)
+        row.dpsText:SetText(string.format("|cff%02x%02x%02x%s|r",
+            math.floor(rc[1] * 255), math.floor(rc[2] * 255), math.floor(rc[3] * 255), RW_FormatDPS(g.total)))
+        row:Show()
+    end
+    for i = #rows + 1, #rw.rows do rw.rows[i]:Hide() end
+    rw.footer:SetText(C.low .. "Click a source to list its items  ·  " ..
+        (track and (RW_TRACK_LABELS[track] or track) or "best track") .. C.reset)
+end
+
+-- Jump from the sources view to the items of one source.
+RW_ShowSource = function(src)
+    local idx
+    for i, s in ipairs(rw.sourceList) do if s == src then idx = i; break end end
+    if not idx then
+        rw.sourceList[#rw.sourceList + 1] = src   -- raid bosses are not listed by default
+        idx = #rw.sourceList
+    end
+    rw.sourceIdx = idx
+    SimdragosaConfig.rwMode = "items"
+    if rw.modeLabel then rw.modeLabel:SetText("View: Items") end
+    RW_Refresh()
+end
+
+-- Re-flow the window after a resize: bar width follows the frame width.
+local function RW_Layout()
+    if not rw.frame then return end
+    local w = rw.frame:GetWidth()
+    rw.barW = math.max(60, math.floor(w - RW_BAR_X - RW_DPS_W - 52))
+    rw.content:SetWidth(w - 44)
+    for _, row in ipairs(rw.rows) do row.barBg:SetWidth(rw.barW) end
+    RW_Refresh()
 end
 
 -- ── Cycle spec / track ────────────────────────────────────────────────────────
@@ -831,23 +1144,6 @@ local function RW_OpenSourceDropdown()
     popup:Show()
 end
 
--- WoW spec ID → SimC spec name (must be declared before RW_Open)
-local SIMC_SPEC_IDS = {
-    [250]="blood",        [251]="frost",         [252]="unholy",
-    [577]="havoc",        [581]="vengeance",
-    [102]="balance",      [103]="feral",         [104]="guardian",     [105]="restoration",
-    [1467]="devastation", [1468]="preservation", [1473]="augmentation",
-    [253]="beast_mastery",[254]="marksmanship",  [255]="survival",
-    [62]="arcane",        [63]="fire",            [64]="frost",
-    [268]="brewmaster",   [270]="mistweaver",    [269]="windwalker",
-    [65]="holy",          [66]="protection",     [70]="retribution",
-    [256]="discipline",   [257]="holy",          [258]="shadow",
-    [259]="assassination",[260]="outlaw",        [261]="subtlety",
-    [262]="elemental",    [263]="enhancement",   [264]="restoration",
-    [265]="affliction",   [266]="demonology",    [267]="destruction",
-    [71]="arms",          [72]="fury",           [73]="protection",
-}
-
 -- ── Open / toggle ─────────────────────────────────────────────────────────────
 
 local function RW_Open()
@@ -882,7 +1178,7 @@ local function RW_Open()
     end
 
     rw.frame:Show()
-    RW_Refresh()
+    RW_Layout()
 end
 
 local function RW_Toggle()
@@ -899,7 +1195,8 @@ function RW_CreateFrame()
     f:SetClampedToScreen(true)
     f:SetFrameStrata("DIALOG")
     f:EnableMouse(true)
-    f:SetResizable(false)
+    f:SetResizable(true)
+    if f.SetResizeBounds then f:SetResizeBounds(440, 360, 1000, 1100) end
     f:RegisterForDrag("LeftButton")
 
     local function SavePos()
@@ -970,6 +1267,29 @@ function RW_CreateFrame()
 
     rw.specLabel  = MakeCycleRow(-36, "Spec:",  RW_CycleSpec)
     rw.trackLabel = MakeCycleRow(-56, "Track:", RW_CycleTrack)
+
+    -- View (items / sources) and sort toggles, top right of the controls
+    local function MakeToggle(yOff, getText, onClick)
+        local btn = CreateFrame("Button", nil, f)
+        btn:SetSize(110, 18)
+        btn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, yOff + 1)
+        local bg = btn:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(0.10, 0.08, 0.18, 0.85)
+        local txt = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        txt:SetPoint("CENTER")
+        txt:SetText(getText())
+        btn:SetScript("OnClick", function() onClick(); txt:SetText(getText()); RW_Refresh() end)
+        btn:SetScript("OnEnter", function() bg:SetColorTexture(0.18, 0.14, 0.30, 0.9) end)
+        btn:SetScript("OnLeave", function() bg:SetColorTexture(0.10, 0.08, 0.18, 0.85) end)
+        return txt
+    end
+    rw.modeLabel = MakeToggle(-36,
+        function() return SimdragosaConfig.rwMode == "sources" and "View: Sources" or "View: Items" end,
+        function() SimdragosaConfig.rwMode = (SimdragosaConfig.rwMode == "sources") and "items" or "sources" end)
+    rw.sortLabel = MakeToggle(-56,
+        function() return SimdragosaConfig.rwSort == "source" and "Sort: Source" or "Sort: Gain" end,
+        function() SimdragosaConfig.rwSort = (SimdragosaConfig.rwSort == "source") and "gain" or "source" end)
 
     -- Source dropdown (replaces cycle row — has too many options for cycling)
     local srcRowLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1063,6 +1383,21 @@ function RW_CreateFrame()
     scrollFrame:SetScript("OnMouseWheel", function(self, delta)
         sb:SetValue(sb:GetValue() - delta * RW_ROW_H * 3)
     end)
+
+    -- ── Resize grip ───────────────────────────────────────────────────────────
+    local grip = CreateFrame("Button", nil, f)
+    grip:SetSize(16, 16)
+    grip:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -4, 4)
+    grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    grip:SetScript("OnMouseDown", function() f:StartSizing("BOTTOMRIGHT") end)
+    grip:SetScript("OnMouseUp", function()
+        f:StopMovingOrSizing()
+        SimdragosaConfig.windowSize = { math.floor(f:GetWidth()), math.floor(f:GetHeight()) }
+        SavePos()
+    end)
+    f:SetScript("OnSizeChanged", function() RW_Layout() end)
 
     -- ── Footer ───────────────────────────────────────────────────────────────
     local footer = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1183,6 +1518,188 @@ RW_CreateMinimapButton = function()
             btn:SetPoint("CENTER", Minimap, "CENTER",
                 radius * math.cos(a), radius * math.sin(a))
         end
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- Loot alerts, Great Vault summary, Encounter Journal badges
+-- ---------------------------------------------------------------------------
+
+local function Say(msg)
+    print(C.label .. ADDON .. C.reset .. ": " .. msg)
+end
+
+-- Gain for a dropped / offered item.  `track` is the track it comes on when
+-- the context says so (instance difficulty, vault row).  Without it the track
+-- cannot be told from the item level alone (Hero 1/6 and Champion 6/6 share
+-- an ilvl), so the best simmed track is reported as "up to".
+local function GainForLink(link, track)
+    if not link then return nil end
+    local itemID = C_Item.GetItemInfoInstant(link)
+    local charData = itemID and GetCharData(GetCharKey())
+    local entry = charData and charData[itemID]
+    if not entry then return nil end
+    local ilvl = C_Item.GetDetailedItemLevelInfo(link)
+    local eq = EquippedIlvl(itemID)
+    if eq and ilvl and eq >= ilvl then return nil end   -- already wearing it, same or better
+    local spec = LootSpecName() or CurrentSpecName()
+    if track then
+        local gain = GainForTrack(entry, spec, track)
+        if gain then return gain, track, false end
+    end
+    local gain, best = BestGain(entry, spec)
+    if not gain then gain, best = BestGain(entry, nil) end
+    return gain, best, true
+end
+
+local function GainText(gain, track, approx)
+    return string.format("%s%s+%s%s %s(%s)%s", approx and "up to " or "", ColourForDPS(gain), FormatDPS(gain),
+        C.reset, C.low, TRACK_SHORT[track] or track or "?", C.reset)
+end
+
+local function InstanceTrack()
+    local _, _, difficultyID = GetInstanceInfo()
+    return DIFF_TRACK[difficultyID]
+end
+
+local lootFrame = CreateFrame("Frame")
+lootFrame:RegisterEvent("ENCOUNTER_LOOT_RECEIVED")
+lootFrame:RegisterEvent("START_LOOT_ROLL")
+lootFrame:SetScript("OnEvent", function(_, event, ...)
+    if not SimdragosaConfig or SimdragosaConfig.lootAlerts == false then return end
+    if event == "ENCOUNTER_LOOT_RECEIVED" then
+        local _, _, itemLink, _, playerName = ...
+        local gain, track, approx = GainForLink(itemLink, InstanceTrack())
+        if not gain then return end
+        local who = playerName and Ambiguate(playerName, "short") or ""
+        if who == UnitName("player") then
+            Say(string.format("you got %s — an upgrade: %s", itemLink, GainText(gain, track, approx)))
+        else
+            Say(string.format("%s looted %s — %s for you. Ask if it's tradeable.", who, itemLink, GainText(gain, track, approx)))
+        end
+    elseif event == "START_LOOT_ROLL" then
+        local rollID = ...
+        local link = GetLootRollItemLink and GetLootRollItemLink(rollID)
+        local gain, track, approx = GainForLink(link, InstanceTrack())
+        if gain then Say(string.format("roll on %s: %s", link, GainText(gain, track, approx))) end
+    end
+end)
+
+-- Great Vault: list the choices that are upgrades, best first, when it opens.
+local function Vault_Report()
+    if not (C_WeeklyRewards and C_WeeklyRewards.GetActivities) then return end
+    local T = Enum and Enum.WeeklyRewardChestThresholdType
+    local RAID  = T and T.Raid or 3
+    local MPLUS = T and (T.Activities or T.MythicPlus) or 1
+    local found, seen = {}, {}
+    for _, activity in ipairs(C_WeeklyRewards.GetActivities() or {}) do
+        -- Raid rows carry the difficulty as their level; M+ rows the key level
+        -- (+10 and up is the Myth track, as the app sims it).
+        local track
+        if activity.type == RAID then track = DIFF_TRACK[activity.level]
+        elseif activity.type == MPLUS then track = (activity.level or 0) >= 10 and "mythic" or "heroic" end
+        for _, reward in ipairs(activity.rewards or {}) do
+            local link = reward.itemDBID and C_WeeklyRewards.GetItemHyperlink(reward.itemDBID)
+            if link and not seen[link] then
+                seen[link] = true
+                local gain, t, approx = GainForLink(link, track)
+                if gain then found[#found + 1] = { link = link, gain = gain, track = t, approx = approx } end
+            end
+        end
+    end
+    if #found == 0 then return end
+    table.sort(found, function(a, b) return a.gain > b.gain end)
+    Say("Great Vault upgrades:")
+    for i = 1, math.min(3, #found) do
+        print(string.format("  %d. %s  %s", i, found[i].link, GainText(found[i].gain, found[i].track, found[i].approx)))
+    end
+end
+
+local vaultHooked = false
+local function Vault_Hook()
+    if vaultHooked or not WeeklyRewardsFrame then return end
+    vaultHooked = true
+    WeeklyRewardsFrame:HookScript("OnShow", function()
+        -- Rewards fill in a moment after the frame opens.
+        C_Timer.After(0.5, function() pcall(Vault_Report) end)
+    end)
+end
+
+-- Encounter Journal: a gain badge on each loot row, for the difficulty shown.
+
+local function EJ_Badge(frame, elementData)
+    if not frame then return end
+    local itemID = frame.itemID
+    if not itemID and elementData and elementData.index and C_EncounterJournal and C_EncounterJournal.GetLootInfoByIndex then
+        local info = C_EncounterJournal.GetLootInfoByIndex(elementData.index)
+        itemID = info and info.itemID
+    end
+    local charData = GetCharData(GetCharKey())
+    local entry = itemID and charData and charData[itemID]
+    local gain
+    if entry and SimdragosaConfig and SimdragosaConfig.enabled then
+        local spec = LootSpecName() or CurrentSpecName()
+        local track = DIFF_TRACK[EJ_GetDifficulty and EJ_GetDifficulty() or 0]
+        for _, sd in ipairs(entry.specs or {}) do
+            if (sd.spec or ""):lower() == spec and track and sd[track] and sd[track] > 0 then gain = sd[track] end
+        end
+        gain = gain or BestGain(entry, spec)
+    end
+    if not frame.SimdragosaBadge then
+        if not gain then return end
+        local fs = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        -- Vertically centred on the right: the corners hold slot / armour type.
+        fs:SetPoint("RIGHT", frame, "RIGHT", -8, 0)
+        frame.SimdragosaBadge = fs
+    end
+    if gain then
+        frame.SimdragosaBadge:SetText(ColourForDPS(gain) .. "+" .. FormatDPS(gain) .. C.reset)
+        frame.SimdragosaBadge:Show()
+    else
+        frame.SimdragosaBadge:Hide()
+    end
+end
+
+local ejHooked = false
+local function EJ_Hook()
+    if ejHooked then return end
+    local info = EncounterJournal and EncounterJournal.encounter and EncounterJournal.encounter.info
+    local sb = info and info.LootContainer and info.LootContainer.ScrollBox
+    if not (sb and ScrollUtil and ScrollUtil.AddInitializedFrameCallback) then return end
+    ejHooked = true
+    ScrollUtil.AddInitializedFrameCallback(sb, function(_, frame, elementData)
+        pcall(EJ_Badge, frame, elementData)
+    end, nil, true)
+end
+
+local blizzFrame = CreateFrame("Frame")
+blizzFrame:RegisterEvent("ADDON_LOADED")
+blizzFrame:SetScript("OnEvent", function(_, _, name)
+    if name == "Blizzard_WeeklyRewards" then pcall(Vault_Hook)
+    elseif name == "Blizzard_EncounterJournal" then pcall(EJ_Hook) end
+end)
+-- Either may already be loaded (e.g. after /reload with the journal open).
+if C_AddOns and C_AddOns.IsAddOnLoaded then
+    if C_AddOns.IsAddOnLoaded("Blizzard_WeeklyRewards") then pcall(Vault_Hook) end
+    if C_AddOns.IsAddOnLoaded("Blizzard_EncounterJournal") then pcall(EJ_Hook) end
+end
+
+-- Chat summary of where the upgrades are: "/sdr keys" (dungeons), "/sdr bosses" (raid).
+local function PrintSourceSummary(sourceType, title)
+    local charKey = GetCharKey()
+    local spec = CurrentSpecName()
+    local track = sourceType == "dungeon" and "heroic" or nil
+    local rows = RW_SourceSummary(charKey, spec, track, sourceType)
+    if #rows == 0 then
+        Say("no " .. title:lower() .. " upgrades stored for " .. (spec or "this spec") .. ".")
+        return
+    end
+    Say(title .. " ranked by total gain (" .. (spec or "all specs") .. "):")
+    for i = 1, math.min(8, #rows) do
+        local r = rows[i]
+        print(string.format("  %d. %s%s%s — %d upgrade%s, %s+%s%s total (top: %s)",
+            i, C.hi, r.name, C.reset, r.count, r.count ~= 1 and "s" or "",
+            C.green, FormatDPS(r.total), C.reset, r.topName))
     end
 end
 
@@ -1581,12 +2098,33 @@ SlashCmdList["SIMDRAGOSA"] = function(msg)
 
     elseif cmd == "staleness" then
         local n = tonumber(msg:match("%d+"))
+        local mode = msg:lower():match("^%s*%S+%s+(%a+)")
         if n then
             SimdragosaConfig.stalenessDays = n
-            print(C.label .. ADDON .. C.reset .. ": hiding entries older than " .. n .. " days.")
+            Say("sims older than " .. n .. " days are now " .. (SimdragosaConfig.hideStale and "hidden" or "dimmed") .. ".")
+        elseif mode == "hide" or mode == "dim" then
+            SimdragosaConfig.hideStale = (mode == "hide")
+            Say("stale sims are now " .. (SimdragosaConfig.hideStale and "hidden" or "dimmed") .. ".")
         else
-            print(C.label .. ADDON .. C.reset .. ": usage: /sdr staleness <days>  (0 = never hide)")
+            Say("usage: /sdr staleness <days>  (0 = never stale)  ·  /sdr staleness hide|dim")
         end
+
+    elseif cmd == "alts" then
+        SimdragosaConfig.showAlts = not (SimdragosaConfig.showAlts ~= false)
+        Say("alt gains in tooltips " .. (SimdragosaConfig.showAlts and "shown" or "hidden") .. ".")
+
+    elseif cmd == "loot" then
+        SimdragosaConfig.lootAlerts = not (SimdragosaConfig.lootAlerts ~= false)
+        Say("loot / roll / vault upgrade alerts " .. (SimdragosaConfig.lootAlerts and "on" or "off") .. ".")
+
+    elseif cmd == "vault" then
+        Vault_Report()
+
+    elseif cmd == "keys" or cmd == "dungeons" then
+        PrintSourceSummary("dungeon", "Dungeons")
+
+    elseif cmd == "bosses" or cmd == "raid" then
+        PrintSourceSummary("raid", "Raid bosses")
 
     elseif cmd == "debug" then
         local charKey = GetCharKey()
@@ -1622,6 +2160,7 @@ SlashCmdList["SIMDRAGOSA"] = function(msg)
                 if e.ilvl    then print(string.format("    ilvl    = %d",  e.ilvl))    end
                 if e.name    then print(string.format("    name    = %s",  e.name))    end
                 if e.updated then print(string.format("    updated = %s",  e.updated)) end
+                if e.stats   then print(string.format("    stats   = %s",  e.stats))   end
                 if e.specs then
                     for _, sd in ipairs(e.specs) do
                         local specLabel = (sd.spec and sd.spec ~= "") and sd.spec or "?"
@@ -1629,6 +2168,7 @@ SlashCmdList["SIMDRAGOSA"] = function(msg)
                         if sd.champion then parts[#parts+1] = string.format("champ=%.1f",  sd.champion) end
                         if sd.heroic   then parts[#parts+1] = string.format("heroic=%.1f", sd.heroic)   end
                         if sd.mythic   then parts[#parts+1] = string.format("mythic=%.1f", sd.mythic)   end
+                        if sd.crafted  then parts[#parts+1] = string.format("crafted=%.1f", sd.crafted) end
                         print(string.format("    [%s]  %s", specLabel, table.concat(parts, "  ")))
                     end
                 end
@@ -1648,8 +2188,21 @@ SlashCmdList["SIMDRAGOSA"] = function(msg)
         print("  /sdr minimap           — show the minimap button if hidden")
         print("  /sdr toggle            — show/hide tooltip lines")
         print("  /sdr status            — show stored item count for your character")
-        print("  /sdr staleness <n>     — hide sims older than N days (0 = never)")
+        print("  /sdr keys              — dungeons ranked by upgrade value (which key to run)")
+        print("  /sdr bosses            — raid bosses ranked by upgrade value")
+        print("  /sdr vault             — list Great Vault choices that are upgrades")
+        print("  /sdr loot              — toggle loot / roll / vault upgrade alerts")
+        print("  /sdr alts              — toggle alt gains in tooltips")
+        print("  /sdr staleness <n>     — sims older than N days count as stale (0 = never)")
+        print("  /sdr staleness hide|dim — hide or dim stale sims in tooltips")
         print("  /sdr debug             — show DB contents and character key")
         print("  /sdr debug <itemID>    — check if a specific item ID has sim data")
     end
 end
+
+-- Exposed on the addon namespace for the offline test harness (tests/run.py).
+ns.test = {
+    BestGain = BestGain, GainForTrack = GainForTrack, AltGains = AltGains,
+    RW_BuildList = RW_BuildList, RW_SourceSummary = RW_SourceSummary,
+    Tooltip_OnItem = Tooltip_OnItem, GainForLink = GainForLink,
+}
