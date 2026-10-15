@@ -437,28 +437,25 @@ local function BestGain(entry, spec)
     return best, bestTrack, bestSpec
 end
 
--- Gain for a concrete item level (loot drop, vault choice): the track whose
--- ilvl is closest to it.  Falls back to the best track when nothing is near.
-local function GainForIlvl(entry, spec, ilvl)
-    if not ilvl or ilvl == 0 then return BestGain(entry, spec) end
-    local bestDiff, gain, track
+-- Gain on one track for a spec (any spec when that one has no value).
+local function GainForTrack(entry, spec, track)
+    local best, anySpec
     for _, sd in ipairs(entry.specs or {}) do
-        local s = sd.spec and sd.spec:lower() or ""
-        if spec == nil or s == spec then
-            for _, t in ipairs(RW_TRACK_ORDER) do
-                local ti = TrackIlvl(t, entry)
-                if sd[t] and sd[t] > 0 and ti then
-                    local d = math.abs(ti - ilvl)
-                    if not bestDiff or d < bestDiff or (d == bestDiff and sd[t] > gain) then
-                        bestDiff, gain, track = d, sd[t], t
-                    end
-                end
-            end
+        local v = sd[track]
+        if v and v > 0 then
+            if (sd.spec or ""):lower() == spec then best = v end
+            if not anySpec or v > anySpec then anySpec = v end
         end
     end
-    if gain and bestDiff <= 10 then return gain, track end
-    return BestGain(entry, spec)
+    return best or anySpec
 end
+
+-- Difficulty ID (instance, journal and vault raid level all share these) ->
+-- the upgrade track that difficulty drops on.  M+ end-of-run loot is Hero.
+local DIFF_TRACK = {
+    [14] = "champion", [15] = "heroic", [16] = "mythic",   -- raid Normal / Heroic / Mythic
+    [8]  = "heroic",                                       -- Mythic Keystone dungeon
+}
 
 -- Other characters (same account) that gain from this item: sorted best first.
 local function AltGains(itemID, myKey)
@@ -1532,8 +1529,11 @@ local function Say(msg)
     print(C.label .. ADDON .. C.reset .. ": " .. msg)
 end
 
--- Gain for an item link at the ilvl it actually dropped at, for the loot spec.
-local function GainForLink(link)
+-- Gain for a dropped / offered item.  `track` is the track it comes on when
+-- the context says so (instance difficulty, vault row).  Without it the track
+-- cannot be told from the item level alone (Hero 1/6 and Champion 6/6 share
+-- an ilvl), so the best simmed track is reported as "up to".
+local function GainForLink(link, track)
     if not link then return nil end
     local itemID = C_Item.GetItemInfoInstant(link)
     local charData = itemID and GetCharData(GetCharKey())
@@ -1543,14 +1543,23 @@ local function GainForLink(link)
     local eq = EquippedIlvl(itemID)
     if eq and ilvl and eq >= ilvl then return nil end   -- already wearing it, same or better
     local spec = LootSpecName() or CurrentSpecName()
-    local gain, track = GainForIlvl(entry, spec, ilvl)
-    if not gain then gain, track = GainForIlvl(entry, nil, ilvl) end
-    return gain, track
+    if track then
+        local gain = GainForTrack(entry, spec, track)
+        if gain then return gain, track, false end
+    end
+    local gain, best = BestGain(entry, spec)
+    if not gain then gain, best = BestGain(entry, nil) end
+    return gain, best, true
 end
 
-local function GainText(gain, track)
-    return string.format("%s+%s%s %s(%s)%s", ColourForDPS(gain), FormatDPS(gain), C.reset,
-        C.low, TRACK_SHORT[track] or track or "?", C.reset)
+local function GainText(gain, track, approx)
+    return string.format("%s%s+%s%s %s(%s)%s", approx and "up to " or "", ColourForDPS(gain), FormatDPS(gain),
+        C.reset, C.low, TRACK_SHORT[track] or track or "?", C.reset)
+end
+
+local function InstanceTrack()
+    local _, _, difficultyID = GetInstanceInfo()
+    return DIFF_TRACK[difficultyID]
 end
 
 local lootFrame = CreateFrame("Frame")
@@ -1560,33 +1569,41 @@ lootFrame:SetScript("OnEvent", function(_, event, ...)
     if not SimdragosaConfig or SimdragosaConfig.lootAlerts == false then return end
     if event == "ENCOUNTER_LOOT_RECEIVED" then
         local _, _, itemLink, _, playerName = ...
-        local gain, track = GainForLink(itemLink)
+        local gain, track, approx = GainForLink(itemLink, InstanceTrack())
         if not gain then return end
         local who = playerName and Ambiguate(playerName, "short") or ""
         if who == UnitName("player") then
-            Say(string.format("you got %s — an upgrade: %s", itemLink, GainText(gain, track)))
+            Say(string.format("you got %s — an upgrade: %s", itemLink, GainText(gain, track, approx)))
         else
-            Say(string.format("%s looted %s — %s for you. Ask if it's tradeable.", who, itemLink, GainText(gain, track)))
+            Say(string.format("%s looted %s — %s for you. Ask if it's tradeable.", who, itemLink, GainText(gain, track, approx)))
         end
     elseif event == "START_LOOT_ROLL" then
         local rollID = ...
         local link = GetLootRollItemLink and GetLootRollItemLink(rollID)
-        local gain, track = GainForLink(link)
-        if gain then Say(string.format("roll on %s: %s", link, GainText(gain, track))) end
+        local gain, track, approx = GainForLink(link, InstanceTrack())
+        if gain then Say(string.format("roll on %s: %s", link, GainText(gain, track, approx))) end
     end
 end)
 
 -- Great Vault: list the choices that are upgrades, best first, when it opens.
 local function Vault_Report()
     if not (C_WeeklyRewards and C_WeeklyRewards.GetActivities) then return end
+    local T = Enum and Enum.WeeklyRewardChestThresholdType
+    local RAID  = T and T.Raid or 3
+    local MPLUS = T and (T.Activities or T.MythicPlus) or 1
     local found, seen = {}, {}
     for _, activity in ipairs(C_WeeklyRewards.GetActivities() or {}) do
+        -- Raid rows carry the difficulty as their level; M+ rows the key level
+        -- (+10 and up is the Myth track, as the app sims it).
+        local track
+        if activity.type == RAID then track = DIFF_TRACK[activity.level]
+        elseif activity.type == MPLUS then track = (activity.level or 0) >= 10 and "mythic" or "heroic" end
         for _, reward in ipairs(activity.rewards or {}) do
             local link = reward.itemDBID and C_WeeklyRewards.GetItemHyperlink(reward.itemDBID)
             if link and not seen[link] then
                 seen[link] = true
-                local gain, track = GainForLink(link)
-                if gain then found[#found + 1] = { link = link, gain = gain, track = track } end
+                local gain, t, approx = GainForLink(link, track)
+                if gain then found[#found + 1] = { link = link, gain = gain, track = t, approx = approx } end
             end
         end
     end
@@ -1594,7 +1611,7 @@ local function Vault_Report()
     table.sort(found, function(a, b) return a.gain > b.gain end)
     Say("Great Vault upgrades:")
     for i = 1, math.min(3, #found) do
-        print(string.format("  %d. %s  %s", i, found[i].link, GainText(found[i].gain, found[i].track)))
+        print(string.format("  %d. %s  %s", i, found[i].link, GainText(found[i].gain, found[i].track, found[i].approx)))
     end
 end
 
@@ -1609,10 +1626,6 @@ local function Vault_Hook()
 end
 
 -- Encounter Journal: a gain badge on each loot row, for the difficulty shown.
-local EJ_DIFF_TRACK = {
-    [14] = "champion", [15] = "heroic", [16] = "mythic",   -- raid N / H / M
-    [23] = "heroic",   [8]  = "heroic",                    -- Mythic / M+ dungeon (M+10 = Hero track)
-}
 
 local function EJ_Badge(frame, elementData)
     if not frame then return end
@@ -1626,7 +1639,7 @@ local function EJ_Badge(frame, elementData)
     local gain
     if entry and SimdragosaConfig and SimdragosaConfig.enabled then
         local spec = LootSpecName() or CurrentSpecName()
-        local track = EJ_DIFF_TRACK[EJ_GetDifficulty and EJ_GetDifficulty() or 0]
+        local track = DIFF_TRACK[EJ_GetDifficulty and EJ_GetDifficulty() or 0]
         for _, sd in ipairs(entry.specs or {}) do
             if (sd.spec or ""):lower() == spec and track and sd[track] and sd[track] > 0 then gain = sd[track] end
         end
@@ -2189,7 +2202,7 @@ end
 
 -- Exposed on the addon namespace for the offline test harness (tests/run.py).
 ns.test = {
-    BestGain = BestGain, GainForIlvl = GainForIlvl, AltGains = AltGains,
+    BestGain = BestGain, GainForTrack = GainForTrack, AltGains = AltGains,
     RW_BuildList = RW_BuildList, RW_SourceSummary = RW_SourceSummary,
     Tooltip_OnItem = Tooltip_OnItem, GainForLink = GainForLink,
 }

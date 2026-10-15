@@ -88,6 +88,7 @@ function Ambiguate(n) return (n:gsub("%-.*$", "")) end
 function IsShiftKeyDown() return false end
 function GetItemInfo() return nil end
 function GetLootRollItemLink(id) return __rolls and __rolls[id] end
+function GetInstanceInfo() return "Test", "raid", __instDiff end
 
 C_Item = {
   GetDetailedItemLevelInfo = function(x)
@@ -185,10 +186,10 @@ def main() -> int:
     # ── gains ──
     g, track, spec = t.BestGain(lua.eval("SimdragosaDB['Xian-SilverMoon'][1]"), "fire")
     check("BestGain picks the best track for the spec", (g, track) == (6900, "mythic"), f"{g} {track}")
-    g, track = t.GainForIlvl(lua.eval("SimdragosaDB['Xian-SilverMoon'][1]"), "fire", 321)
-    check("GainForIlvl maps a 321 drop to the Hero track", (g, track) == (4210, "heroic"), f"{g} {track}")
-    g, track = t.GainForIlvl(lua.eval("SimdragosaDB['Xian-SilverMoon'][4]"), "fire", 331)
-    check("GainForIlvl uses the stored ilvl for crafted", (g, track) == (2500, "crafted"), f"{g} {track}")
+    e1 = lua.eval("SimdragosaDB['Xian-SilverMoon'][1]")
+    check("GainForTrack reads the spec's value", t.GainForTrack(e1, "frost", "heroic") == 2800, "")
+    check("GainForTrack falls back to any spec", t.GainForTrack(e1, "arcane", "mythic") == 6900, "")
+    check("GainForTrack is nil for an unsimmed track", t.GainForTrack(e1, "fire", "champion") is None, "")
 
     # ── tooltip ──
     lines = [strip(l) for l in tooltip_lines(lua, ns, 1)]
@@ -283,13 +284,19 @@ def main() -> int:
         p = lua.eval("__calls.prints")
         return [strip(p[i]) for i in range(1, len(p) + 1)]
 
-    out = fire_loot("ENCOUNTER_LOOT_RECEIVED", 1, 1, "link:1:321", 1, "Xian-SilverMoon", "MAGE")
-    check("own loot upgrade is announced", any("you got link:1:321" in l and "+4.2k" in l for l in out), str(out))
-    out = fire_loot("ENCOUNTER_LOOT_RECEIVED", 1, 1, "link:1:334", 1, "Brakka-SilverMoon", "WARRIOR")
+    lua.execute("__instDiff = 15")   # Heroic raid: drops are Hero track
+    out = fire_loot("ENCOUNTER_LOOT_RECEIVED", 1, 1, "link:1:308", 1, "Xian-SilverMoon", "MAGE")
+    check("own loot upgrade uses the instance's track", any("you got link:1:308" in l and "+4.2k" in l
+          and "(Heroic)" in l and "up to" not in l for l in out), str(out))
+    lua.execute("__instDiff = 16")
+    out = fire_loot("ENCOUNTER_LOOT_RECEIVED", 1, 1, "link:1:321", 1, "Brakka-SilverMoon", "WARRIOR")
     check("someone else's upgrade-for-you is announced", any("Brakka looted" in l and "+6.9k" in l for l in out), str(out))
+    lua.execute("__instDiff = nil")
+    out = fire_loot("ENCOUNTER_LOOT_RECEIVED", 1, 1, "link:1:300", 1, "Xian", "MAGE")
+    check("unknown track is reported as 'up to' the best", any("up to +6.9k" in l for l in out), str(out))
     out = fire_loot("ENCOUNTER_LOOT_RECEIVED", 1, 999, "link:999:334", 1, "Xian", "MAGE")
     check("non-upgrades stay quiet", out == [], str(out))
-    lua.execute("__rolls = { [7] = 'link:3:321' }")
+    lua.execute("__rolls = { [7] = 'link:3:321' }; __instDiff = 8")
     out = fire_loot("START_LOOT_ROLL", 7)
     check("loot rolls are announced", any("roll on link:3:321" in l for l in out), str(out))
 
@@ -297,8 +304,8 @@ def main() -> int:
     lua.execute("""
       C_WeeklyRewards = {
         GetActivities = function() return {
-          { rewards = { { itemDBID = "a" }, { itemDBID = "b" } } },
-          { rewards = { { itemDBID = "c" } } },
+          { type = 3, level = 15, rewards = { { itemDBID = "a" }, { itemDBID = "b" } } },
+          { type = 1, level = 10, rewards = { { itemDBID = "c" } } },
         } end,
         GetItemHyperlink = function(id) return ({ a = "link:1:334", b = "link:999:334", c = "link:3:334" })[id] end,
       }
@@ -308,8 +315,10 @@ def main() -> int:
     lua.execute("__calls.prints = {}; WeeklyRewardsFrame:Show()")
     p = lua.eval("__calls.prints")
     out = [strip(p[i]) for i in range(1, len(p) + 1)]
-    check("vault opening lists upgrade choices, best first",
-          len(out) >= 3 and "Great Vault upgrades" in out[0] and "link:1:334" in out[1] and "link:3:334" in out[2]
+    # raid row at Heroic -> Signet's Hero value 4210; M+10 row -> Cloak's Myth value 1800
+    check("vault lists upgrade choices best first, at each row's track",
+          len(out) >= 3 and "Great Vault upgrades" in out[0]
+          and "link:1:334" in out[1] and "+4.2k" in out[1] and "link:3:334" in out[2] and "+1.8k" in out[2]
           and not any("link:999" in l for l in out), str(out))
 
     # ── Encounter Journal badges ──
